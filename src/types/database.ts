@@ -247,10 +247,13 @@ export type NotificationSettingsRow = {
  * (Tables + Views + Functions at the schema level; Row + Insert + Update
  * + Relationships per table) so `.from(...)`/`.select(...)`/`.insert(...)`
  * infer real types instead of silently collapsing to `never`. There are
- * no Views or Functions yet, and no table's Relationships are modeled
- * (we don't do embedded/joined `.select()` calls yet) — `[]` for
- * Relationships and `Record<string, never>` for Views/Functions are
- * accurate placeholders for "none defined", not shortcuts.
+ * no Views yet, and no table's Relationships are modeled (we don't do
+ * embedded/joined `.select()` calls yet) — `[]` for Relationships and
+ * `Record<string, never>` for Views are accurate placeholders for "none
+ * defined", not shortcuts. Functions lists each Postgres function the
+ * app calls via `.rpc(...)` (currently just register_patient, migration
+ * 0011) with its real Args/Returns shape — add new ones here as they're
+ * added as migrations.
  */
 type Table<Row, Insert, Update = Partial<Row>> = {
   Row: Row;
@@ -278,6 +281,27 @@ export type Database = {
       notification_settings: Table<NotificationSettingsRow, Partial<NotificationSettingsRow>>;
     };
     Views: Record<string, never>;
-    Functions: Record<string, never>;
+    Functions: {
+      register_patient: {
+        Args: {
+          p_full_name: string;
+          p_national_id: string | null;
+          p_date_of_birth: string | null;
+          p_phone: string | null;
+          p_alternative_phone: string | null;
+          p_address: string | null;
+          p_emergency_contact_name: string | null;
+          p_emergency_contact_phone: string | null;
+          p_community_health_worker_id: string;
+          p_notes: string | null;
+          p_gravida: number | null;
+          p_para: number | null;
+          p_lmp: string | null;
+          p_edd: string;
+          p_gestational_information: string | null;
+        };
+        Returns: string;
+      };
+    };
   };
 };

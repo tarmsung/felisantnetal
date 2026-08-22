@@ -1,6 +1,7 @@
 import { requireUser } from "@/lib/auth/session";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { AppHeader } from "@/components/layout/app-header";
+import { PageHeaderProvider } from "@/lib/contexts/page-header-context";
 
 /**
  * Shared shell for every authenticated route. requireUser() redirects to
@@ -16,12 +17,14 @@ export default async function AppLayout({
   const user = await requireUser();
 
   return (
-    <div className="flex min-h-screen w-full">
-      <AppSidebar user={user} />
-      <div className="flex min-h-screen flex-1 flex-col">
-        <AppHeader role={user.role} />
-        <main className="flex-1 p-4 md:p-7">{children}</main>
+    <PageHeaderProvider>
+      <div className="flex min-h-screen w-full">
+        <AppSidebar user={user} />
+        <div className="flex min-h-screen flex-1 flex-col">
+          <AppHeader role={user.role} />
+          <main className="flex-1 p-4 md:p-7">{children}</main>
+        </div>
       </div>
-    </div>
+    </PageHeaderProvider>
   );
 }
