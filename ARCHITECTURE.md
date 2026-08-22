@@ -17,8 +17,8 @@ one starts.
 
 | Phase | Scope | Status |
 |---|---|---|
-| 1 | Project setup: schema, architecture, design system, auth skeleton | **Done** (this checkpoint) |
-| 2 | Patient management: registration, search, profile | Not started |
+| 1 | Project setup: schema, architecture, design system, auth skeleton | **Done** |
+| 2 | Patient management: registration, search, profile | **Done** (this checkpoint) |
 | 3 | ANC scheduling: engine, calendar, rescheduling, missed visits | Not started |
 | 4 | Clinical records: visit recording, validation, risk flag engine | Not started |
 | 5 | WhatsApp reminders: notification service, scheduler, delivery logs | Not started |
@@ -131,6 +131,57 @@ here:
   assigned-nurse field anywhere else. If per-nurse assignment is wanted
   later, add `patients.assigned_nurse_id` and tighten the
   `patients_select` policy — it's a small, additive change from here.
+
+## Multi-row writes: a Postgres function, not sequential REST calls
+
+Registering a patient creates two rows — `patients` and its first
+`pregnancies` episode — that must succeed or fail together. Supabase's
+REST API has no multi-statement transaction, so `patientService
+.registerPatient()` calls `register_patient()` (migration `20260101000011`),
+a plain `plpgsql` function that does both inserts and lets Postgres's own
+per-call transaction handle atomicity. It's deliberately **not**
+`security definer` — it runs as whoever calls it, so the same
+`patients_insert`/`pregnancies_insert` RLS policies apply as if the two
+inserts had been made directly. Reach for this pattern again any time a
+feature needs more than one table to change together (recording a visit
+against an appointment in Phase 4 will likely need it too).
+
+## Working with this stack: known rough edges
+
+Found by actually driving the app in a browser against the live
+database, not just by lint/typecheck/build passing — worth knowing
+before Phase 3+ hits the same walls again:
+
+- **Base UI's `Select.Value` does not derive a label from the matching
+  `Select.Item`.** Unlike Radix, it shows the raw `value` unless given
+  a render-function child: `<SelectValue>{(value) => label}</SelectValue>`.
+  Every `<Select>` in this codebase (see `patient-form.tsx`) uses this;
+  copy that pattern, not a bare `<SelectValue placeholder="..." />`.
+- **`zodResolver`/`standardSchemaResolver` + a schema whose input type
+  differs from its output type (any `.transform()`) fights
+  react-hook-form's own generics.** Every combination of explicit
+  `useForm<...>` generics we tried produced the same class of error
+  (`Control<...>` "two different types with this name exist"). The
+  working pattern, used in `patient-form.tsx`: type `useForm` with only
+  the raw (pre-transform) shape, and cast once at the `handleSubmit`
+  boundary where the real (post-transform) value is handed to the
+  caller. Don't spend time re-deriving this per form — reuse the pattern.
+- **A server action that receives already-parsed data needs a schema
+  built for that shape, not the form's raw-string schema re-run.**
+  `patientOutputSchema` exists because re-validating a real `number`
+  through a schema whose field starts `z.string()...` rejects it
+  outright. Any future "call the server action directly with structured
+  data" flow needs its own output-shaped schema the same way.
+- **`diffForAudit()`'s return type is deliberately `Pick<AuditLogInput,
+  ...>`, not an inline object literal.** It used to return
+  `{old_values, new_values}` (matching the DB column names) while
+  `logAuditEvent()` expected `{oldValues, newValues}`; spreading the
+  mismatched object into a call silently dropped both fields, and
+  every audit entry recorded `null` for months of would-be usage before
+  it was caught by reading an actual audit trail, not by the type
+  checker (TS's excess-property check doesn't apply to spread
+  arguments). Any new "shape produced here, spread into a call there"
+  helper should tie its return type to the consumer's type the same way.
 
 ## Notifications (WhatsApp, and later SMS/email)
 
