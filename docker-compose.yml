@@ -1,0 +1,22 @@
+# The database is a hosted Supabase project — there is intentionally no
+# Postgres service here. This compose file exists so the app can be run
+# as a container consistently in any environment (spec section 37), with
+# all secrets supplied at deploy time via env_file, never baked in.
+#
+# Usage: copy .env.example to .env.local, fill it in, then:
+#   docker compose up --build
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
+    env_file:
+      - .env.local
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
