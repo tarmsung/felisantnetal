@@ -108,6 +108,7 @@ export type AppointmentRow = {
   rescheduled_from: string | null;
   reschedule_reason: string | null;
   cancellation_reason: string | null;
+  notes: string | null;
   created_by: string | null;
   updated_by: string | null;
   created_at: string;

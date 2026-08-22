@@ -87,3 +87,104 @@ export function formatDisplayDate(value: string | null): string {
     year: "numeric",
   });
 }
+
+/**
+ * Pure calendar-date arithmetic ("YYYY-MM-DD" in, "YYYY-MM-DD" out) in a
+ * fixed UTC-as-calendar frame, so the result never depends on the
+ * server process's own timezone setting (unlike using JS's "local" Date
+ * methods, which reflect whatever timezone the Node runtime happens to
+ * be configured with). `days` may be negative.
+ */
+export function addDaysToIsoDate(isoDate: string, days: number): string | null {
+  const [year, month, day] = isoDate.split("-").map(Number);
+  if (!year || !month || !day) return null;
+  const date = new Date(Date.UTC(year, month - 1, day) + days * 86_400_000);
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
+}
+
+/**
+ * Felis Clinic's single timezone. Appointments (`scheduled_date`) are a
+ * real `timestamptz`, not a date-only column, so — unlike everything
+ * above — the *time of day* matters and the server/viewer's own
+ * timezone must never leak into either storing or displaying it.
+ * Harare does not observe DST, so a fixed +02:00 offset is safe and
+ * correct year-round; this would need generalizing (a real IANA-aware
+ * conversion, e.g. via a library) if the clinic ever operated across
+ * multiple timezones, but that's not this deployment.
+ */
+export const CLINIC_TIMEZONE = "Africa/Harare";
+const CLINIC_UTC_OFFSET = "+02:00";
+
+/**
+ * Converts a `<input type="datetime-local">` value (e.g.
+ * "2026-09-01T09:00", always in the *viewer's* wall-clock notation with
+ * no timezone info) into a UTC ISO string for storage, treating the
+ * input as clinic-local time regardless of where the browser itself is.
+ * `Date` has no built-in way to parse a wall-clock string against an
+ * IANA zone name — hence the hardcoded offset rather than
+ * `CLINIC_TIMEZONE` here (display formatting below uses the IANA name
+ * instead, since `Intl` *can* format-by-zone natively).
+ */
+export function clinicLocalDateTimeToIso(localDateTime: string): string | null {
+  if (!localDateTime) return null;
+  const date = new Date(`${localDateTime}:00${CLINIC_UTC_OFFSET}`);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+/** Inverse of clinicLocalDateTimeToIso, for prefilling a datetime-local input from a stored timestamp. */
+export function isoToClinicDateTimeLocal(value: string | null): string {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: CLINIC_TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+  const part = (type: string) => parts.find((p) => p.type === type)?.value ?? "00";
+
+  return `${part("year")}-${part("month")}-${part("day")}T${part("hour")}:${part("minute")}`;
+}
+
+/** Formats a timestamptz for display in clinic-local time, e.g. "1 Sep 2026, 09:00". */
+export function formatClinicDateTime(value: string | null): string {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleString("en-GB", {
+    timeZone: CLINIC_TIMEZONE,
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+/** Just the time portion in clinic-local time, e.g. "09:00". */
+export function formatClinicTime(value: string | null): string {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleTimeString("en-GB", {
+    timeZone: CLINIC_TIMEZONE,
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+/** Calendar-day key (YYYY-MM-DD) for a timestamp, in clinic-local time — for grouping appointments by day. */
+export function clinicDateKey(value: string): string {
+  const date = new Date(value);
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: CLINIC_TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}

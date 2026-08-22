@@ -1,6 +1,7 @@
 import "server-only";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { logAuditEvent, diffForAudit } from "@/lib/services/auditService";
+import { sweepMissedAppointments } from "@/lib/services/appointmentService";
 import type { PatientRow, PregnancyRow } from "@/types/database";
 import type { PatientFormInput, DuplicateCheckInput } from "@/lib/validation/patientSchemas";
 
@@ -352,6 +353,7 @@ export interface PatientSummary {
  * hardcoded to look populated (spec section 44).
  */
 export async function getPatientSummary(patientId: string): Promise<PatientSummary> {
+  await sweepMissedAppointments();
   const supabase = await createSupabaseServerClient();
 
   const [visitsCompleted, configuredTemplates, nextAppointment, missed, activeFlags] =

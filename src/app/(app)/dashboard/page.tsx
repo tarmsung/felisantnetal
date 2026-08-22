@@ -10,6 +10,8 @@ import {
   Gauge,
 } from "lucide-react";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { sweepMissedAppointments } from "@/lib/services/appointmentService";
+import { getDayRange, todayKey } from "@/lib/calendar";
 import { MetricCard } from "@/components/shared/metric-card";
 import { EmptyState } from "@/components/shared/empty-state";
 import { BarChart3 } from "lucide-react";
@@ -29,18 +31,16 @@ export const metadata: Metadata = { title: "Dashboard" };
  * would just be redone in Phase 6.
  */
 export default async function DashboardPage() {
+  await sweepMissedAppointments();
   const supabase = await createSupabaseServerClient();
 
-  const startOfToday = new Date();
-  startOfToday.setHours(0, 0, 0, 0);
-  const endOfToday = new Date(startOfToday);
-  endOfToday.setDate(endOfToday.getDate() + 1);
-
-  const startOfMonth = new Date(
-    startOfToday.getFullYear(),
-    startOfToday.getMonth(),
-    1,
-  );
+  // Clinic-local ("Africa/Harare") day boundaries, not the server
+  // process's own timezone (see lib/dates.ts) — otherwise "today" could
+  // be off by a couple of hours around midnight depending on where the
+  // app happens to be deployed.
+  const { startIso: startOfToday, endIso: endOfToday } = getDayRange(todayKey());
+  const [year, month] = todayKey().split("-").map(Number);
+  const startOfMonth = `${year}-${String(month).padStart(2, "0")}-01`;
 
   const [
     totalPatients,
@@ -64,13 +64,13 @@ export default async function DashboardPage() {
     supabase
       .from("appointments")
       .select("id", { count: "exact", head: true })
-      .gte("scheduled_date", startOfToday.toISOString())
-      .lt("scheduled_date", endOfToday.toISOString()),
+      .gte("scheduled_date", startOfToday)
+      .lt("scheduled_date", endOfToday),
     supabase
       .from("appointments")
       .select("id", { count: "exact", head: true })
       .eq("status", "scheduled")
-      .gte("scheduled_date", endOfToday.toISOString()),
+      .gte("scheduled_date", endOfToday),
     supabase
       .from("appointments")
       .select("id", { count: "exact", head: true })
@@ -87,7 +87,7 @@ export default async function DashboardPage() {
     supabase
       .from("clinical_visits")
       .select("id", { count: "exact", head: true })
-      .gte("visit_date", startOfMonth.toISOString().slice(0, 10)),
+      .gte("visit_date", startOfMonth),
   ]);
 
   const completed = completedAppointments.count ?? 0;

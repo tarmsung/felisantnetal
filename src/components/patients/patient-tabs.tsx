@@ -5,9 +5,11 @@ import { ComingSoon } from "@/components/shared/coming-soon";
 
 export function PatientTabs({
   overview,
+  appointments,
   auditHistory,
 }: {
   overview: React.ReactNode;
+  appointments: React.ReactNode;
   /** Omitted entirely (not just empty) for non-administrators — RLS hides the underlying data too. */
   auditHistory?: React.ReactNode;
 }) {
@@ -30,7 +32,7 @@ export function PatientTabs({
         <ComingSoon moduleName="ANC visit history" phase={4} />
       </TabsContent>
       <TabsContent value="appointments" className="pt-4">
-        <ComingSoon moduleName="Appointment history" phase={3} />
+        {appointments}
       </TabsContent>
       <TabsContent value="clinical" className="pt-4">
         <ComingSoon moduleName="Clinical history" phase={4} />

@@ -7,10 +7,12 @@ import {
   getCommunityHealthWorkerName,
   getPatientSummary,
 } from "@/lib/services/patientService";
+import { listAppointmentsForPatient } from "@/lib/services/appointmentService";
 import { listAuditLogsForEntity } from "@/lib/services/auditService";
 import { PatientHeader } from "@/components/patients/patient-header";
 import { PatientSummaryCards } from "@/components/patients/patient-summary-cards";
 import { PatientOverview } from "@/components/patients/patient-overview";
+import { PatientAppointments } from "@/components/patients/patient-appointments";
 import { PatientAuditHistory } from "@/components/patients/patient-audit-history";
 import { PatientTabs } from "@/components/patients/patient-tabs";
 import { SetPageHeader } from "@/components/layout/set-page-header";
@@ -36,10 +38,11 @@ export default async function PatientProfilePage({
   const patient = await getPatientById(id);
   if (!patient) notFound();
 
-  const [pregnancy, chwName, summary, auditEntries] = await Promise.all([
+  const [pregnancy, chwName, summary, appointments, auditEntries] = await Promise.all([
     getLatestPregnancy(id),
     getCommunityHealthWorkerName(patient.community_health_worker_id),
     getPatientSummary(id),
+    listAppointmentsForPatient(id),
     user.role === "administrator" ? listAuditLogsForEntity("patient", id) : Promise.resolve(null),
   ]);
 
@@ -55,6 +58,15 @@ export default async function PatientProfilePage({
       <PatientTabs
         overview={
           <PatientOverview patient={patient} pregnancy={pregnancy} chwName={chwName} />
+        }
+        appointments={
+          <PatientAppointments
+            patientId={patient.id}
+            pregnancyId={pregnancy?.id ?? null}
+            patientName={patient.full_name}
+            patientNumber={patient.patient_number}
+            appointments={appointments}
+          />
         }
         auditHistory={
           auditEntries ? <PatientAuditHistory entries={auditEntries} /> : undefined

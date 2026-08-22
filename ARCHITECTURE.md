@@ -18,8 +18,8 @@ one starts.
 | Phase | Scope | Status |
 |---|---|---|
 | 1 | Project setup: schema, architecture, design system, auth skeleton | **Done** |
-| 2 | Patient management: registration, search, profile | **Done** (this checkpoint) |
-| 3 | ANC scheduling: engine, calendar, rescheduling, missed visits | Not started |
+| 2 | Patient management: registration, search, profile | **Done** |
+| 3 | ANC scheduling: engine, calendar, rescheduling, missed visits | **Done** (this checkpoint) |
 | 4 | Clinical records: visit recording, validation, risk flag engine | Not started |
 | 5 | WhatsApp reminders: notification service, scheduler, delivery logs | Not started |
 | 6 | Dashboard and reports: metrics, charts, filters | Not started |
@@ -131,6 +131,85 @@ here:
   assigned-nurse field anywhere else. If per-nurse assignment is wanted
   later, add `patients.assigned_nurse_id` and tighten the
   `patients_select` policy — it's a small, additive change from here.
+- **Rescheduling never moves an appointment's date — it creates a new
+  row.** Section 7 says the original scheduled date must be retained.
+  `appointmentService.rescheduleAppointment()` marks the original
+  `rescheduled` (untouched otherwise) and inserts a new appointment with
+  `rescheduled_from` pointing back at it, so both the original commitment
+  and the change are permanently on record, not overwritten.
+- **Missed-appointment detection runs inline on read, not on a cron.**
+  Section 27 lists this as a background job, but Phase 3 doesn't build
+  cron infrastructure — that's bundled with Phase 5's reminders. Until
+  then, `appointmentService.sweepMissedAppointments()` (a plain `UPDATE
+  ... WHERE status = 'scheduled' AND scheduled_date < now()`) runs at
+  the top of every read path that shows appointment status (the
+  calendar, missed visits, dashboard, a patient's summary cards), so
+  `status` never drifts from reality regardless of which page a staff
+  member happens to open first. It attributes its audit log entries to
+  `user_id: null` (RLS's `audit_logs_insert` policy explicitly allows
+  this) since no staff member actually took the action. Replace the call
+  sites with a real scheduled job in Phase 5 without changing the
+  function itself.
+- **A missed appointment is still fully actionable, not a dead end.**
+  The first version of `AppointmentDetailSheet` only showed Complete/
+  Reschedule/Cancel for `status === "scheduled"`, hiding them for
+  `"missed"` — but spec section 13 explicitly lists "Mark completed,
+  Reschedule, Contact patient, Add note" as the actions on a *missed*
+  visit, which is exactly the case the Missed Visits page exists to
+  help resolve. Fixed to `canResolve = status === "scheduled" ||
+  status === "missed"`; only "Mark missed" itself stays restricted to
+  `"scheduled"` (re-marking an already-missed visit is a no-op).
+
+## The ANC scheduling engine, and what it does when nothing is configured
+
+`ancService.suggestNextVisit()` is the concrete answer to spec section
+7's "the scheduling engine should determine recommended dates according
+to the configured guideline" — but migration `20260101000010` seeded
+every `anc_schedule_templates` row with `recommended_gestational_week =
+NULL` (see "Key decisions" above: no guideline values are invented).
+So the engine always resolves which visit number is next (by comparing
+against the pregnancy's existing appointments), and separately, *only if*
+both a gestational week is configured **and** the pregnancy's LMP is on
+file, computes a suggested calendar day as `LMP + N weeks` — plain
+obstetric arithmetic, not a guessed date. Whichever piece is missing, it
+returns a `reasonNoSuggestion` string instead of guessing, and
+`AddAppointmentDialog` surfaces that text directly under the date field
+rather than silently leaving it unexplained. Once Settings (Phase 8)
+lets an administrator fill in `recommended_gestational_week` for each
+visit, suggestions start appearing automatically — no code change
+required, because the engine was written against the configured case
+from the start rather than bolted on later.
+
+## Clinic timezone handling
+
+Every other date in this schema (`date_of_birth`, EDD, LMP,
+`registration_date`) is a plain Postgres `date` with no time component,
+so "which calendar day" is the only question and `lib/dates.ts`'s
+`parseDateOnly`-style local-construction avoids a UTC-parse/local-format
+round trip shifting it by a day. `appointments.scheduled_date` is
+different — a real `timestamptz` where the *time* matters — which
+introduces a question those date-only fields never raise: whose
+timezone? `lib/dates.ts` fixes this at `CLINIC_TIMEZONE =
+"Africa/Harare"` (fixed UTC+2, no DST) and:
+
+- `clinicLocalDateTimeToIso()` converts a `<input type="datetime-local">`
+  value into a UTC instant *as clinic-local time*, regardless of the
+  browser's own timezone — never `new Date(localString).toISOString()`,
+  which would silently use the browser's/server's zone instead.
+- `formatClinicDateTime()` / `formatClinicTime()` do the reverse for
+  display, via `Intl`'s `timeZone` option, so a viewer in a different
+  timezone still sees the appointment's Harare wall-clock time, not
+  their own.
+- `lib/calendar.ts`'s day/week/month range boundaries are all computed
+  in clinic-local time too — "today" and "this week" must mean Harare's
+  calendar, not the Node process's.
+
+If Felis Clinic ever operates across multiple timezones, the fixed
+`+02:00` offset in `clinicLocalDateTimeToIso` would need to become a
+real IANA-aware conversion (a library, since `Date` can't parse a
+wall-clock string against a zone name natively) — not needed for this
+single-clinic deployment, but noted so it isn't mistaken for an
+oversight.
 
 ## Multi-row writes: a Postgres function, not sequential REST calls
 
@@ -182,6 +261,33 @@ before Phase 3+ hits the same walls again:
   checker (TS's excess-property check doesn't apply to spread
   arguments). Any new "shape produced here, spread into a call there"
   helper should tie its return type to the consumer's type the same way.
+- **Resetting several `useState` fields at once on a prop/open change
+  belongs to a `key`, not an effect.** `AddAppointmentDialog`'s form
+  needs a full reset every time it opens (cleared fields, re-run patient
+  search, etc.). The first version did this with a `useEffect` that
+  called half a dozen setters — exactly the "cascading renders" pattern
+  `react-hooks/set-state-in-effect` exists to catch, and also just more
+  code. The fix: split the dialog shell (owns `open` only) from an inner
+  form component, and mount the form with `key={sessionId}` where
+  `sessionId` increments only when the dialog *opens* (not on close, so
+  the closing animation doesn't visibly reset mid-fade). A fresh key
+  means a fresh component instance with fresh `useState` initial values
+  — no reset effect needed at all. Reuse this for any future dialog/form
+  that needs "start over" semantics (Phase 4's visit form included).
+- **A "selected row" opened in a detail sheet should be an id, not a
+  copy of the row.** The first version of `AppointmentDetailSheet`'s
+  callers (`AppointmentCalendar`, `MissedVisitsTable`,
+  `PatientAppointments`) stored the whole selected `AppointmentListRow`
+  in state. Live-tested consequence: clicking "Mark completed" or "Add
+  note" correctly updated the database and called `router.refresh()`,
+  but the *already-open* sheet kept showing the stale pre-action data
+  until closed and reopened, because the fresh server data landed in
+  the `appointments` prop while the separately-stored `selected` copy
+  never got told about it. The fix in all three: store `selectedId`
+  and derive `appointments.find(a => a.id === selectedId)` during
+  render. No effect, no sync bug, and a resolved row (rescheduled away,
+  cancelled) naturally disappears from a filtered list like Missed
+  Visits instead of the sheet showing a ghost of it.
 
 ## Notifications (WhatsApp, and later SMS/email)
 
