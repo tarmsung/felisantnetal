@@ -20,9 +20,9 @@ one starts.
 | 1 | Project setup: schema, architecture, design system, auth skeleton | **Done** |
 | 2 | Patient management: registration, search, profile | **Done** |
 | 3 | ANC scheduling: engine, calendar, rescheduling, missed visits | **Done** |
-| 4 | Clinical records: visit recording, validation, risk flag engine | **Done** (this checkpoint) |
-| 5 | WhatsApp reminders: notification service, scheduler, delivery logs | Not started |
-| 6 | Dashboard and reports: metrics, charts, filters | Not started |
+| 4 | Clinical records: visit recording, validation, risk flag engine | **Done** |
+| 5 | WhatsApp reminders: notification service, scheduler, delivery logs | **Deferred** — skipped ahead to Phase 6 at the project owner's request; nothing in Phase 6 depends on it |
+| 6 | Dashboard and reports: metrics, charts, filters | **Done** (this checkpoint) |
 | 7 | PDF generation: patient card, report exports | Not started |
 | 8 | Administration: users, settings, clinical rule config, audit log viewer | Not started |
 | 9 | Security & optimization pass | Not started |
@@ -230,6 +230,38 @@ operator needs simply never triggers rather than throwing — that's an
 administrator misconfiguration to fix in Settings, not a reason to
 break visit recording for every nurse until they do.
 
+## The reporting module: date ranges, bucketing, and what's real vs. deferred
+
+Phase 6 was built ahead of Phase 5 (WhatsApp reminders) at the project
+owner's request — nothing here depends on reminders/notifications
+existing; every chart and report is built from `patients`/
+`appointments`/`clinical_visits`/`risk_flags`, all populated since
+Phases 1–4. The one casualty is a "reminder delivery" report, which
+will slot in as a fifth Reports tab once Phase 5 lands, showing
+honestly-empty data until then rather than being faked.
+
+`lib/reportRange.ts` resolves a preset ("Last 30 days", "This month",
+etc.) or an explicit custom start/end into a clinic-local `[startKey,
+endKey]` day-key pair, and separately picks week-vs-month bucket
+granularity for trend charts (more than ~90 days of range switches from
+weekly to monthly bars, so a 12-month chart doesn't render 52
+illegibly-thin bars). It's pure and directly unit-tested
+(`reportRange.test.ts`) the same way `lib/dates.ts`/`lib/calendar.ts`
+are, taking "today" as a parameter rather than reading the clock itself.
+
+`lib/services/reportService.ts` fetches the rows in range and
+buckets/aggregates them in JS rather than pushing `GROUP BY` into
+Postgres via raw SQL — deliberately, for a single small clinic's
+volume: the query is simple, the result is easy to reason about, and
+there's no realistic near-term data volume where this stops being fast
+enough. Each report function (`getAttendanceReport`,
+`getHighRiskReport`, `getMissedVisitReport`, `getPatientSummaryReport`)
+returns both the aggregated shape a chart/summary card needs *and* the
+underlying flat rows, so the Reports page's CSV export
+(`ExportCsvButton`) can build a CSV client-side from data already
+fetched server-side — no second round trip just to reformat what the
+page already has.
+
 ## Clinic timezone handling
 
 Every other date in this schema (`date_of_birth`, EDD, LMP,
@@ -383,6 +415,40 @@ before Phase 3+ hits the same walls again:
   it") instead of either silently swallowing it (too quiet for a missed
   clinical risk) or throwing (too loud for what's actually a secondary
   effect of a primary action that already succeeded).
+- **recharts' `<ResponsiveContainer>` can measure its container mid-layout
+  and then never re-measure, painting the wrong size forever.** Found
+  live (Phase 6): a donut/bar chart below the fold rendered as a
+  completely blank card — but `getBoundingClientRect`/`getComputedStyle`
+  on its SVG showed correct geometry, fill colors, and hit-testing the
+  whole time. A real window resize instantly fixed every chart on the
+  page at once, which was the giveaway: `ResizeObserver` (what
+  `ResponsiveContainer` uses internally) only fires again on an actual
+  subsequent size *change* of the observed element, not because the
+  first reading was wrong — and Next.js SSR/hydration can finish a
+  chart's container layout without ever producing such a change.
+  Fixed by not using `ResponsiveContainer` at all:
+  `components/reports/chart-container.tsx` runs its own `ResizeObserver`
+  on a plain wrapper div, renders nothing until the first real
+  measurement lands, and hands `{width, height}` straight to recharts'
+  chart components. Every chart in `components/reports/` uses this —
+  reach for it, not `ResponsiveContainer`, for any future chart.
+- **A flex child needs explicit `min-w-0` before its own
+  `overflow-x-auto` wrapper can do anything.** Found live (Phase 6): the
+  High Risk report's table has a `reason` cell with a long, unbroken
+  (`truncate`, i.e. `white-space: nowrap`) string. Browsers compute a
+  flex item's default `min-width` as `auto`, which means "at least as
+  wide as your widest content's min-content size" — *even inside* an
+  `overflow-x-auto` wrapper, since `overflow-x-auto` only starts
+  scrolling once the container has a definite width to overflow
+  against. With no `min-w-0` anywhere in the app shell's sidebar/main
+  flex row (`app/(app)/layout.tsx`), that one table's intrinsic width
+  propagated all the way up through every ancestor, forcing the entire
+  page to scroll horizontally instead of just that one table. Invisible
+  through Phases 1–5 because no earlier table had a single unbroken
+  string that long. Fixed by adding `min-w-0` to the shell's main
+  content column and `<main>` itself — the fix belongs in the shared
+  shell, not the one table, since the next long string (a clinical note,
+  an audit log diff) would trip the same failure anywhere else in the app.
 
 ## Notifications (WhatsApp, and later SMS/email)
 

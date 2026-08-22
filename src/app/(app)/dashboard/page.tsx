@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import {
   Users2,
   UserCheck,
@@ -12,23 +13,28 @@ import {
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { sweepMissedAppointments } from "@/lib/services/appointmentService";
 import { getDayRange, todayKey } from "@/lib/calendar";
+import { resolveReportRange } from "@/lib/reportRange";
+import {
+  getAttendanceReport,
+  getActiveRiskBySeverity,
+  getPatientSummaryReport,
+} from "@/lib/services/reportService";
 import { MetricCard } from "@/components/shared/metric-card";
-import { EmptyState } from "@/components/shared/empty-state";
-import { BarChart3 } from "lucide-react";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { AttendanceTrendChart } from "@/components/reports/attendance-trend-chart";
+import { StatusBreakdownChart } from "@/components/reports/status-breakdown-chart";
+import { RiskSeverityChart } from "@/components/reports/risk-severity-chart";
+import { RegistrationTrendChart } from "@/components/reports/registration-trend-chart";
 
 export const metadata: Metadata = { title: "Dashboard" };
 
 /**
- * Every count below is a live query — there is no seeded/demo dashboard
- * data (spec section 12 explicitly forbids that once the database
- * exists). On a fresh database this legitimately renders zeros.
- *
- * Charts (attendance trend, appointment status split, risk overview,
- * registration trend) are intentionally not built yet: the spec's own
- * phase plan (section 43, Phase 6) pairs "Dashboard and reports" with
- * the analytics/reporting module, which needs the reportService and
- * filtering this phase hasn't built. Building ad-hoc charts here now
- * would just be redone in Phase 6.
+ * Every count and chart below is a live query — there is no seeded/demo
+ * dashboard data (spec section 12 explicitly forbids that once the
+ * database exists). On a fresh database this legitimately renders
+ * zeros and empty charts. The four trend charts reuse reportService
+ * (Phase 6) with fixed, dashboard-appropriate ranges rather than a
+ * user-adjustable one — that's what the Reports page is for.
  */
 export default async function DashboardPage() {
   await sweepMissedAppointments();
@@ -98,6 +104,17 @@ export default async function DashboardPage() {
       ? null
       : Math.round((completed / adherenceDenominator) * 100);
 
+  // Fixed, dashboard-appropriate ranges — a user-adjustable range lives
+  // on the Reports page, not here. 90 days buckets weekly
+  // (pickBucketGranularity), 12 months buckets monthly.
+  const attendanceRange = resolveReportRange(todayKey(), "90d");
+  const registrationRange = resolveReportRange(todayKey(), "12m");
+  const [attendance, riskBySeverity, patientSummary] = await Promise.all([
+    getAttendanceReport(attendanceRange.startKey, attendanceRange.endKey),
+    getActiveRiskBySeverity(),
+    getPatientSummaryReport(registrationRange.startKey, registrationRange.endKey),
+  ]);
+
   return (
     <div className="flex flex-col gap-6">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -151,11 +168,47 @@ export default async function DashboardPage() {
         />
       </div>
 
-      <EmptyState
-        icon={BarChart3}
-        title="Attendance & risk charts arrive with the Reports module"
-        description="Trend charts for ANC attendance, appointment status, risk overview and registrations are built together with reportService in a later phase, once there's real appointment and visit data to chart."
-      />
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-foreground">Trends</h2>
+        <Link href="/reports" className="text-sm font-medium text-primary hover:underline">
+          View full reports →
+        </Link>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>Attendance trend (last 90 days)</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <AttendanceTrendChart data={attendance.trend} />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>Appointment status (last 90 days)</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <StatusBreakdownChart data={attendance.statusBreakdown} />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>Active risk flags by severity</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <RiskSeverityChart data={riskBySeverity} />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>Registration trend (last 12 months)</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <RegistrationTrendChart data={patientSummary.registrationTrend.trend} />
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

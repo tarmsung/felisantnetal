@@ -146,6 +146,9 @@ export interface MissedAppointmentFilters {
   minDaysOverdue?: number;
   riskStatus?: RiskStatus;
   createdBy?: string;
+  /** Original scheduled_date bounds, clinic-local day keys' ISO instants — added for the Reports module (Phase 6) so a "missed visits this month" report can scope the same underlying list rather than duplicating this query. */
+  scheduledFromIso?: string;
+  scheduledToIso?: string;
 }
 
 export interface MissedAppointmentRow extends AppointmentListRow {
@@ -162,6 +165,8 @@ export async function listMissedAppointments(
 
   let builder = supabase.from("appointments").select("*").eq("status", "missed");
   if (filters.createdBy) builder = builder.eq("created_by", filters.createdBy);
+  if (filters.scheduledFromIso) builder = builder.gte("scheduled_date", filters.scheduledFromIso);
+  if (filters.scheduledToIso) builder = builder.lt("scheduled_date", filters.scheduledToIso);
 
   const { data, error } = await builder.order("scheduled_date", { ascending: true });
   if (error) throw new Error(`Failed to load missed appointments: ${error.message}`);

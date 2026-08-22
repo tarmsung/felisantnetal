@@ -20,9 +20,18 @@ export default async function AppLayout({
     <PageHeaderProvider>
       <div className="flex min-h-screen w-full">
         <AppSidebar user={user} />
-        <div className="flex min-h-screen flex-1 flex-col">
+        {/* min-w-0 overrides the flex default of min-width: auto, which
+            otherwise lets this column grow to fit whatever its widest
+            descendant wants to be (a table cell with a long, unbroken
+            reason/notes string, say) instead of holding to the space the
+            sidebar row actually gives it — the classic "flexbox ignores
+            my overflow-x-auto wrapper" bug. Found live (Phase 6): a
+            table cell with a long risk-flag reason forced this whole
+            column, and the page, to scroll horizontally instead of just
+            that one table scrolling within its own border. */}
+        <div className="flex min-h-screen min-w-0 flex-1 flex-col">
           <AppHeader role={user.role} />
-          <main className="flex-1 p-4 md:p-7">{children}</main>
+          <main className="min-w-0 flex-1 p-4 md:p-7">{children}</main>
         </div>
       </div>
     </PageHeaderProvider>
