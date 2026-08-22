@@ -14,14 +14,45 @@
  *      .env.local (or pass them as environment variables inline).
  *   3. Run: npm run db:seed
  *
- * This script uses relative imports rather than the project's "@/..."
- * alias — tsx runs it outside of Next's bundler, and relative paths
+ * This script deliberately does NOT import lib/supabase/service.ts or
+ * lib/services/userService.ts even though their logic overlaps with
+ * what's below. Both of those carry an `import "server-only"` guard,
+ * which resolves correctly only inside Next's own RSC bundler (it picks
+ * the "react-server" export condition); run directly via tsx like this
+ * script is, that condition is never set, so `server-only` always throws
+ * "This module cannot be imported from a Client Component module" even
+ * though nothing here is a Client Component. Rather than weaken that
+ * guard for the real app, this script stays self-contained with its own
+ * minimal copy of the service-client + user-creation logic.
+ *
+ * Uses relative imports rather than the project's "@/..." alias for the
+ * same reason: tsx runs outside of Next's bundler, and relative paths
  * avoid depending on whether tsconfig path-alias resolution is picked up
  * for a bare script invocation.
  */
-import "dotenv/config";
-import { createStaffUser } from "../src/lib/services/userService";
-import { createSupabaseServiceClient } from "../src/lib/supabase/service";
+import { config as loadEnv } from "dotenv";
+import { createClient } from "@supabase/supabase-js";
+
+// dotenv/config would only load ".env" — this project's convention
+// (matching Next.js's own env-file precedence) is ".env.local".
+loadEnv({ path: ".env.local" });
+import type { Database } from "../src/types/database";
+
+function createServiceClient() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!url || !serviceKey) {
+    console.error(
+      "Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env.local before running this script.",
+    );
+    process.exit(1);
+  }
+
+  return createClient<Database>(url, serviceKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+}
 
 async function main() {
   const email = process.env.SEED_ADMIN_EMAIL;
@@ -40,7 +71,8 @@ async function main() {
     process.exit(1);
   }
 
-  const supabase = createSupabaseServiceClient();
+  const supabase = createServiceClient();
+
   const { data: existing } = await supabase
     .from("users")
     .select("id, email, role")
@@ -54,16 +86,40 @@ async function main() {
     return;
   }
 
-  const user = await createStaffUser({
-    fullName,
+  const { data: created, error: authError } = await supabase.auth.admin.createUser({
     email,
-    role: "administrator",
-    temporaryPassword: password,
+    password,
+    email_confirm: true,
   });
 
+  if (authError || !created.user) {
+    console.error(`Failed to create auth user: ${authError?.message ?? "unknown error"}`);
+    process.exit(1);
+  }
+
+  const { data: profile, error: profileError } = await supabase
+    .from("users")
+    .insert({
+      id: created.user.id,
+      full_name: fullName,
+      email,
+      role: "administrator",
+      status: "active",
+    })
+    .select("*")
+    .single();
+
+  if (profileError || !profile) {
+    // Roll back the orphaned auth user so re-running the script isn't
+    // blocked by a dangling email address with no profile.
+    await supabase.auth.admin.deleteUser(created.user.id);
+    console.error(`Failed to create user profile: ${profileError?.message ?? "unknown error"}`);
+    process.exit(1);
+  }
+
   console.log("Administrator account created:");
-  console.log(`  Name:  ${user.full_name}`);
-  console.log(`  Email: ${user.email}`);
+  console.log(`  Name:  ${profile.full_name}`);
+  console.log(`  Email: ${profile.email}`);
   console.log(
     "Sign in at /login with the password you set in SEED_ADMIN_PASSWORD, then change it from the account's own settings.",
   );
