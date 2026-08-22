@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
-import { CalendarClock, CheckCircle2, Phone, StickyNote, XCircle } from "lucide-react";
+import { CalendarClock, CheckCircle2, Phone, Stethoscope, StickyNote, XCircle } from "lucide-react";
 import {
   Sheet,
   SheetContent,
@@ -12,12 +12,14 @@ import {
   SheetDescription,
   SheetFooter,
 } from "@/components/ui/sheet";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { AppointmentStatusBadge } from "@/components/appointments/appointment-status-badge";
 import { RiskBadge } from "@/components/shared/risk-badge";
 import { RescheduleDialog } from "@/components/appointments/reschedule-dialog";
 import { CancelDialog } from "@/components/appointments/cancel-dialog";
 import { AddNoteDialog } from "@/components/appointments/add-note-dialog";
+import { RecordVisitForm } from "@/components/visits/record-visit-dialog";
 import {
   completeAppointmentAction,
   markAppointmentMissedAction,
@@ -37,7 +39,7 @@ export function AppointmentDetailSheet({
   onChanged?: () => void;
 }) {
   const [pending, startTransition] = useTransition();
-  const [dialog, setDialog] = useState<"reschedule" | "cancel" | "note" | null>(null);
+  const [dialog, setDialog] = useState<"reschedule" | "cancel" | "note" | "record-visit" | null>(null);
 
   if (!appointment) return null;
 
@@ -142,6 +144,10 @@ export function AppointmentDetailSheet({
           <SheetFooter className="mt-auto flex-col gap-2 sm:flex-col">
             {canResolve ? (
               <>
+                <Button variant="outline" onClick={() => setDialog("record-visit")} disabled={pending}>
+                  <Stethoscope className="h-4 w-4" />
+                  Record visit
+                </Button>
                 <Button onClick={handleComplete} disabled={pending}>
                   <CheckCircle2 className="h-4 w-4" />
                   Mark completed
@@ -207,6 +213,27 @@ export function AppointmentDetailSheet({
         onOpenChange={(o) => setDialog(o ? "note" : null)}
         onDone={() => onChanged?.()}
       />
+      <Dialog open={dialog === "record-visit"} onOpenChange={(o) => setDialog(o ? "record-visit" : null)}>
+        <DialogContent className="sm:max-w-lg">
+          {dialog === "record-visit" ? (
+            <RecordVisitForm
+              initialPatient={{
+                id: appointment.patient_id,
+                fullName: appointment.patient_full_name,
+                patientNumber: appointment.patient_number,
+                pregnancyId: appointment.pregnancy_id,
+              }}
+              initialAppointment={{ id: appointment.id, visitNumber: appointment.visit_number }}
+              onClose={() => setDialog(null)}
+              onCreated={() => {
+                setDialog(null);
+                onOpenChange(false);
+                onChanged?.();
+              }}
+            />
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

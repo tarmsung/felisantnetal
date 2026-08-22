@@ -8,11 +8,16 @@ import {
   getPatientSummary,
 } from "@/lib/services/patientService";
 import { listAppointmentsForPatient } from "@/lib/services/appointmentService";
+import { listVisitsForPatient } from "@/lib/services/clinicalVisitService";
+import { listRiskFlagsForPatient } from "@/lib/services/riskService";
 import { listAuditLogsForEntity } from "@/lib/services/auditService";
 import { PatientHeader } from "@/components/patients/patient-header";
 import { PatientSummaryCards } from "@/components/patients/patient-summary-cards";
 import { PatientOverview } from "@/components/patients/patient-overview";
 import { PatientAppointments } from "@/components/patients/patient-appointments";
+import { PatientVisits } from "@/components/patients/patient-visits";
+import { PatientClinicalHistory } from "@/components/patients/patient-clinical-history";
+import { PatientRiskFlags } from "@/components/patients/patient-risk-flags";
 import { PatientAuditHistory } from "@/components/patients/patient-audit-history";
 import { PatientTabs } from "@/components/patients/patient-tabs";
 import { SetPageHeader } from "@/components/layout/set-page-header";
@@ -38,11 +43,13 @@ export default async function PatientProfilePage({
   const patient = await getPatientById(id);
   if (!patient) notFound();
 
-  const [pregnancy, chwName, summary, appointments, auditEntries] = await Promise.all([
+  const [pregnancy, chwName, summary, appointments, visits, riskFlags, auditEntries] = await Promise.all([
     getLatestPregnancy(id),
     getCommunityHealthWorkerName(patient.community_health_worker_id),
     getPatientSummary(id),
     listAppointmentsForPatient(id),
+    listVisitsForPatient(id),
+    listRiskFlagsForPatient(id),
     user.role === "administrator" ? listAuditLogsForEntity("patient", id) : Promise.resolve(null),
   ]);
 
@@ -68,6 +75,19 @@ export default async function PatientProfilePage({
             appointments={appointments}
           />
         }
+        visits={
+          <PatientVisits
+            patientId={patient.id}
+            pregnancyId={pregnancy?.id ?? null}
+            patientName={patient.full_name}
+            patientNumber={patient.patient_number}
+            patientRiskStatus={patient.risk_status}
+            visits={visits}
+            isAdmin={user.role === "administrator"}
+          />
+        }
+        clinicalHistory={<PatientClinicalHistory visits={visits} flags={riskFlags} />}
+        riskFlags={<PatientRiskFlags patientId={patient.id} flags={riskFlags} />}
         auditHistory={
           auditEntries ? <PatientAuditHistory entries={auditEntries} /> : undefined
         }

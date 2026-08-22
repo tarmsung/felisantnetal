@@ -5,11 +5,17 @@ import { ComingSoon } from "@/components/shared/coming-soon";
 
 export function PatientTabs({
   overview,
+  visits,
   appointments,
+  clinicalHistory,
+  riskFlags,
   auditHistory,
 }: {
   overview: React.ReactNode;
+  visits: React.ReactNode;
   appointments: React.ReactNode;
+  clinicalHistory: React.ReactNode;
+  riskFlags: React.ReactNode;
   /** Omitted entirely (not just empty) for non-administrators — RLS hides the underlying data too. */
   auditHistory?: React.ReactNode;
 }) {
@@ -29,16 +35,16 @@ export function PatientTabs({
         {overview}
       </TabsContent>
       <TabsContent value="visits" className="pt-4">
-        <ComingSoon moduleName="ANC visit history" phase={4} />
+        {visits}
       </TabsContent>
       <TabsContent value="appointments" className="pt-4">
         {appointments}
       </TabsContent>
       <TabsContent value="clinical" className="pt-4">
-        <ComingSoon moduleName="Clinical history" phase={4} />
+        {clinicalHistory}
       </TabsContent>
       <TabsContent value="risk" className="pt-4">
-        <ComingSoon moduleName="Risk flag history" phase={4} />
+        {riskFlags}
       </TabsContent>
       <TabsContent value="documents" className="pt-4">
         <ComingSoon moduleName="Downloadable patient documents" phase={7} />

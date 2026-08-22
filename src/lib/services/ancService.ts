@@ -109,3 +109,25 @@ export async function suggestNextVisit(
     reasonNoSuggestion: null,
   };
 }
+
+export interface NextVisitNumberSuggestion {
+  visitNumber: number | null;
+  template: AncScheduleTemplateRow | null;
+}
+
+/**
+ * Phase 4's clinical-visit-recording counterpart to suggestNextVisit
+ * above: figures out which visit NUMBER is next, with no date math at
+ * all. Recording a visit happens the day it happens — there's no
+ * "suggested date" to compute, so this skips the LMP/gestational-week
+ * lookup entirely rather than calling suggestNextVisit and discarding
+ * half its result.
+ */
+export async function suggestNextVisitNumber(
+  existingVisitNumbers: number[],
+): Promise<NextVisitNumberSuggestion> {
+  const templates = await getActiveScheduleTemplates();
+  const usedNumbers = new Set(existingVisitNumbers);
+  const nextTemplate = templates.find((t) => !usedNumbers.has(t.visit_number)) ?? null;
+  return { visitNumber: nextTemplate?.visit_number ?? null, template: nextTemplate };
+}

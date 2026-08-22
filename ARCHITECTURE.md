@@ -19,8 +19,8 @@ one starts.
 |---|---|---|
 | 1 | Project setup: schema, architecture, design system, auth skeleton | **Done** |
 | 2 | Patient management: registration, search, profile | **Done** |
-| 3 | ANC scheduling: engine, calendar, rescheduling, missed visits | **Done** (this checkpoint) |
-| 4 | Clinical records: visit recording, validation, risk flag engine | Not started |
+| 3 | ANC scheduling: engine, calendar, rescheduling, missed visits | **Done** |
+| 4 | Clinical records: visit recording, validation, risk flag engine | **Done** (this checkpoint) |
 | 5 | WhatsApp reminders: notification service, scheduler, delivery logs | Not started |
 | 6 | Dashboard and reports: metrics, charts, filters | Not started |
 | 7 | PDF generation: patient card, report exports | Not started |
@@ -159,6 +159,23 @@ here:
   help resolve. Fixed to `canResolve = status === "scheduled" ||
   status === "missed"`; only "Mark missed" itself stays restricted to
   `"scheduled"` (re-marking an already-missed visit is a no-op).
+- **Recording a clinical visit against an appointment completes that
+  appointment as part of the same action**, rather than leaving the
+  nurse to separately click "Mark completed" afterwards
+  (`clinicalVisitService.recordVisit`, spec section 7 — a visit is the
+  real-world event an appointment exists to track). It only does this
+  for `scheduled`/`missed` appointments; a visit can also be recorded
+  with no appointment at all (a walk-in), in which case there's nothing
+  to complete.
+- **Correcting a visit (administrator-only) does not re-run the risk
+  rules engine.** `risk_flags` are permanent history of what was
+  believed true *at the time* (migration `20260101000007`'s
+  `protect_risk_flag_history`), and silently raising or retracting a
+  flag as a side effect of a data correction would bypass the human
+  review the flag review workflow (below) exists for. If a correction
+  changes a value enough to matter clinically, that's a manual judgement
+  call via the Risk Flags tab, not something the correction form does
+  for you.
 
 ## The ANC scheduling engine, and what it does when nothing is configured
 
@@ -179,6 +196,39 @@ lets an administrator fill in `recommended_gestational_week` for each
 visit, suggestions start appearing automatically — no code change
 required, because the engine was written against the configured case
 from the start rather than bolted on later.
+
+## The clinical rules engine, and its threshold convention
+
+`riskService.evaluateAndFlagVisit()` is Phase 4's answer to spec section
+11 — it runs a just-recorded `clinical_visits` row through every *active*
+`clinical_rules` row and raises a `risk_flags` row per match, recording
+`rule_version` for traceability. Same philosophy as the scheduling engine
+above: migration `20260101000010` seeds five rule slots (weight, BP ×2,
+fundal height, FHR, Hb) with `is_active = false` and every threshold
+`NULL`, so on a fresh install this engine runs and finds nothing to
+raise — not because it's broken, but because no administrator has
+configured a threshold yet (Phase 8's Settings module will let them).
+
+The pure evaluation logic lives in `riskRules.ts`, deliberately split out
+from `riskService.ts` (which owns the Supabase reads/writes and imports
+`"server-only"`) so it has no such import and is directly unit-testable
+the same way `lib/dates.ts`/`lib/calendar.ts` are (see
+`riskRules.test.ts`) — a service file can't be imported from a Vitest
+file that also gets pulled into a client bundle graph, since
+`server-only` throws in that context.
+
+**Threshold convention** (an implementation decision this project made,
+not something the spec dictates): `clinical_rules` has `threshold_min`
+and `threshold_max`, but three of the six operators (`lt`/`lte`/`gt`/
+`gte`) are single-sided and only need one number. This project reads
+`threshold_min` as *the* configured cutoff for all four single-sided
+operators — `threshold_max` is ignored for those and only matters
+together with `threshold_min` for the two two-sided operators
+(`between`/`outside`, e.g. an FHR that's abnormal both too low and too
+high). A rule that's active but missing the threshold(s) its own
+operator needs simply never triggers rather than throwing — that's an
+administrator misconfiguration to fix in Settings, not a reason to
+break visit recording for every nurse until they do.
 
 ## Clinic timezone handling
 
@@ -222,8 +272,19 @@ per-call transaction handle atomicity. It's deliberately **not**
 `security definer` — it runs as whoever calls it, so the same
 `patients_insert`/`pregnancies_insert` RLS policies apply as if the two
 inserts had been made directly. Reach for this pattern again any time a
-feature needs more than one table to change together (recording a visit
-against an appointment in Phase 4 will likely need it too).
+feature needs more than one table to change together *and* a half-done
+result would actually be broken data.
+
+Phase 4's "recording a visit completes its appointment" does touch two
+tables, but deliberately stays as two separate sequential calls
+(`clinicalVisitService.recordVisit()` inserts the visit, then calls
+`appointmentService.completeAppointment()`) rather than one RPC — unlike
+a patient with no pregnancy, an appointment still `scheduled` after its
+visit was successfully recorded isn't corrupt, just slightly stale
+denormalization. The risk-evaluation step in the same function follows
+the opposite reasoning again (see "Working with this stack" below): it's
+wrapped in its own `try/catch` specifically so *its* failure can't undo
+or block the already-successful visit insert.
 
 ## Working with this stack: known rough edges
 
@@ -288,6 +349,40 @@ before Phase 3+ hits the same walls again:
   render. No effect, no sync bug, and a resolved row (rescheduled away,
   cancelled) naturally disappears from a filtered list like Missed
   Visits instead of the sheet showing a ghost of it.
+- **A bare-string-literal `CASE` inside an `UPDATE ... SET` for an enum
+  column resolves as `text`, not the target enum — and there's no
+  implicit cast.** `sync_patient_risk_status()` (migration
+  `20260101000007`) built `risk_status = case when has_active then
+  'high_risk' else 'normal' end` with no cast on either branch. Its
+  `WHERE ... IS DISTINCT FROM (case ... ::public.risk_status ... end)`
+  guard *did* cast correctly, which is exactly why this stayed invisible
+  through Phases 1–3: the trigger only ever ran with `has_active =
+  false`→`false` (no `risk_flags` row had ever existed yet), so the
+  `WHERE` guard's `IS DISTINCT FROM` was always false and the broken
+  `SET` clause never actually executed. The instant Phase 4 raised the
+  first-ever `risk_flags` row live, the guard flipped true, the `UPDATE`
+  ran, and it failed with `column "risk_status" is of type risk_status
+  but expression is of type text` — fixed in migration `20260101000013`
+  by casting both `SET`-clause branches the same way the `WHERE` clause
+  already did. Lesson: a literal used inside a `CASE` does not inherit
+  the "unknown → infer from context" treatment a bare literal gets: cast
+  every enum-producing branch explicitly, always.
+- **A side-effect that runs after the "real" write must not be able to
+  make the whole action look like it failed.** The bug above surfaced
+  through `clinicalVisitService.recordVisit()` throwing *after* the
+  `clinical_visits` row had already been successfully inserted — so the
+  nurse saw "failed to record visit" while the visit had, in fact, been
+  saved (just without risk evaluation). Recording it again would have
+  hit the `(pregnancy_id, visit_number)` unique constraint, or worse,
+  the nurse might have given up entirely, leaving a real elevated
+  reading both saved *and* silently unflagged. Fixed by wrapping the
+  `evaluateAndFlagVisit()` call in its own `try/catch`: a risk-evaluation
+  failure now still reports the visit as recorded, with a distinct
+  `riskEvaluationError` surfaced to the UI ("recorded, but risk
+  evaluation could not be completed — an administrator should review
+  it") instead of either silently swallowing it (too quiet for a missed
+  clinical risk) or throwing (too loud for what's actually a secondary
+  effect of a primary action that already succeeded).
 
 ## Notifications (WhatsApp, and later SMS/email)
 
