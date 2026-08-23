@@ -1,0 +1,47 @@
+name: CI
+
+# Phase 10. Runs everything that doesn't need a real Supabase project —
+# lint, typecheck, unit tests (Vitest, pure logic only, no live network
+# calls), and a production build. Deliberately does NOT run the
+# Playwright E2E suite here: those tests exercise a real hosted Supabase
+# project end to end (see playwright.config.ts and README "Running
+# tests"), and this clinic's data is not something to touch from an
+# automated, unattended workflow on every push. Run `npm run test:e2e`
+# locally, pointed at a project you're comfortable seeding and cleaning
+# up against, before a release.
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run lint
+
+      - run: npx tsc --noEmit
+
+      - run: npm run test
+
+      # NEXT_PUBLIC_* values are compiled into the client bundle, but the
+      # build itself doesn't need them to be real — no page in this app
+      # is statically prerendered against live Supabase data (see the
+      # Route column of `npm run build`'s own output: everything data-
+      # dependent is "ƒ" / server-rendered on demand, not "○" / static),
+      # so placeholder values are enough to prove the build compiles.
+      - run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://ci-placeholder.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder-anon-key
+          NEXT_PUBLIC_APP_URL: http://localhost:3000

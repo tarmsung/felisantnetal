@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Plus, Copy, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -54,6 +55,15 @@ export function AddUserDialog() {
 }
 
 function AddUserForm({ onClose }: { onClose: () => void }) {
+  // UsersPage (src/app/(app)/users/page.tsx) is a Server Component, so
+  // unlike AddAppointmentDialog's onCreated prop (wired by a client
+  // parent to its own router.refresh()), there's no client closure a
+  // Server Component page could pass in here — this dialog refreshes
+  // itself instead. Found live (Phase 10 E2E pass): without this, the
+  // new row genuinely didn't appear until a manual reload, since
+  // `listUsers()` only runs once, at the Server Component's initial
+  // render.
+  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | undefined>();
   const [created, setCreated] = useState<{ email: string; password: string } | undefined>();
@@ -119,6 +129,7 @@ function AddUserForm({ onClose }: { onClose: () => void }) {
           <Button
             onClick={() => {
               toast.success("Account created.");
+              router.refresh();
               onClose();
             }}
           >

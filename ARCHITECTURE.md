@@ -25,8 +25,8 @@ one starts.
 | 6 | Dashboard and reports: metrics, charts, filters | **Done** |
 | 7 | PDF generation: patient card, report exports | **Done** |
 | 8 | Administration: users, settings, clinical rule config, audit log viewer | **Done** |
-| 9 | Security & optimization pass | **Done** (this checkpoint) |
-| 10 | Testing & deployment | Ongoing in every phase; hardened at the end |
+| 9 | Security & optimization pass | **Done** |
+| 10 | Testing & deployment | **Done** (this checkpoint) — Phase 5 remains the only deferred phase |
 
 The sidebar/navigation (`src/lib/navigation.ts`) already lists every
 module from the final IA, each tagged with the phase that implements it.
@@ -713,6 +713,94 @@ Content-Security-Policy, which needs a fresh value per request):
   would need shared state (Redis/KV) this stack doesn't otherwise have,
   and would only duplicate protection GoTrue already provides.
 
+## Phase 10: testing & deployment
+
+The final phase — no new application features, hardening what already
+exists. Two threads: expanding E2E coverage now that enough of the app
+exists to make it worthwhile, and closing the remaining deployment gaps
+(CI, a real health check, a couple of config gaps that only showed up
+once there was E2E output to expose them).
+
+**E2E coverage.** `playwright.config.ts` had said since Phase 1 that the
+primary workflows would be added "phase by phase as those features
+land" — Phase 10 is that point. Added: `e2e/patient-registration.spec.ts`
+(minimum-fields registration, plus the duplicate-check dialog),
+`e2e/appointment-scheduling.spec.ts`, and `e2e/admin-users.spec.ts`
+(staff account creation and deactivation), backed by a shared
+`e2e/helpers.ts`. High-risk review has no spec, deliberately: producing
+a real risk flag needs a real `clinical_visits` row, and both
+`clinical_visits` and `risk_flags` are permanently unmodifiable/append-
+only health records by design (see below) — worse, `reportService.ts`'s
+active-risk aggregation and the dashboard's visit counts have no filter
+excluding soft-deleted patients, so a test-triggered risk flag would
+permanently skew the clinic's real monthly reports and dashboard
+statistics, not just leave an inert orphaned row somewhere. That fails
+this suite's own "leaves the database exactly as it found it" bar in a
+way nothing else does, so it was left uncovered rather than shipped as
+something that quietly corrupts live analytics. If Phase 5 or a later
+pass wants this covered, it needs either a disposable staging Supabase
+project (this app has never had one — every phase's live verification
+has run against the one real project) or a reporting-layer fix to
+exclude soft-deleted patients first.
+
+**The "nothing can be hard-deleted" schema constraint, confirmed the
+hard way.** Migration 0007's `prevent_delete` trigger — installed so no
+UI bug or bad actor can destroy a health/administrative record — fires
+even for a service-role connection, which is otherwise the one client
+that bypasses RLS. There is no privilege level under this schema that
+can hard-delete a patient, pregnancy, appointment, clinical visit, risk
+flag, community health worker, or staff account. This mattered
+concretely for E2E cleanup, which can't rely on "delete what you
+created": patients are soft-deleted (`deleted_at`), appointments are
+cancelled (the same terminal state the app's own cancel workflow uses),
+and staff accounts are deactivated — real, durable cleanup, just not
+literal deletion. `public.users.id references auth.users(id) on delete
+cascade` looks like it should let `supabase.auth.admin.deleteUser()`
+clean up a staff account fully, but the cascade hits the same trigger
+and fails once a `public.users` row exists — confirmed by
+`userService.createStaffUser`'s own rollback code, which only ever
+calls that on an *orphaned* auth user (one whose profile insert failed),
+never a fully-created one. A community health worker can't be created
+disposably either, so the E2E suite reuses whichever one a project
+already has rather than making its own permanent one.
+
+**CI.** `.github/workflows/ci.yml` runs lint, typecheck, unit tests, and
+a production build on every push/PR — deliberately not the E2E suite,
+for the same reason described in the README: those tests touch this
+clinic's one real hosted Supabase project, which isn't something to do
+unattended on every push. The build step uses placeholder
+`NEXT_PUBLIC_*` values; confirmed safe by checking the `npm run build`
+route table itself — every data-dependent route is `ƒ` (server-rendered
+on demand), not `○` (static/prerendered), so nothing at build time
+actually needs those values to resolve to a real project.
+
+**Health check.** `GET /api/health` (`src/app/api/health/route.ts`)
+queries `clinic_settings` through the ordinary anon-key server client
+and reports `503` on failure — actually proving the app can reach
+Supabase, not just that the Node process is up. It's excluded from
+`proxy.ts`'s matcher entirely (not added to `PUBLIC_PATHS`, which is
+about redirecting *logged-in* users away from `/login` — a different
+concern): a liveness probe has no session cookie and shouldn't be
+redirected, or pay for a session-refresh round trip on every check. The
+Dockerfile's `HEALTHCHECK` now points at it.
+
+**Two small bugs found by finally having E2E output to expose them:**
+- `AddUserDialog` (`src/components/users/add-user-dialog.tsx`) had no
+  way to refresh the users list after creating an account — its parent
+  page is a Server Component, so unlike `AddAppointmentDialog`'s
+  `onCreated` prop (wired by a client-component parent to its own
+  `router.refresh()`), there was no client closure a Server Component
+  page could pass in. Fixed by having the dialog call `router.refresh()`
+  on itself directly, since it's already a Client Component.
+- `eslint.config.mjs` didn't exclude `playwright-report/`/`test-results/`
+  — harmless until this phase actually generated some, at which point
+  `npm run lint` started reporting hundreds of errors against Playwright's
+  own minified trace-viewer bundle. Added to `globalIgnores` alongside
+  the existing `.next`/`out`/`build` entries.
+
+**Database indexes**: none added this phase — Phase 9's pass already
+covered the query-pattern gap left by migration 0008.
+
 ## Notifications (WhatsApp, and later SMS/email)
 
 The *sending* half isn't built yet (Phase 5), but the shape is decided
@@ -741,9 +829,16 @@ doesn't pass it.
 - **Unit** (Vitest, `src/**/*.test.ts`): pure logic — validation
   schemas, the navigation/access-control config, and (from Phase 3
   onward) the scheduling/risk/report calculations.
-- **E2E** (Playwright, `e2e/*.spec.ts`): the primary workflows from
-  section 30, added as each one becomes possible to drive end-to-end.
-  Requires a configured Supabase project — see README "Running tests".
+- **E2E** (Playwright, `e2e/*.spec.ts`): login, patient registration
+  (plus the duplicate-check dialog), appointment scheduling, and admin
+  user management — added phase by phase as each became drivable
+  end-to-end, completed in Phase 10. High-risk review is deliberately
+  not covered; see Phase 10's section above for why. Requires a
+  configured Supabase project and a pair of disposable staff accounts —
+  see README "Running tests".
+- **CI** (`.github/workflows/ci.yml`, Phase 10): lint, typecheck, unit
+  tests, and a production build on every push/PR. Not the E2E suite —
+  see the same Phase 10 section.
 
 ## Deployment
 

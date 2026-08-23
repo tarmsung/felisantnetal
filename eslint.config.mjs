@@ -12,6 +12,12 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Playwright's own generated output (Phase 10) — bundled trace-viewer
+    // JS and per-test artifacts, not source, but nothing above already
+    // excluded it and `npm run lint` was linting minified vendor code as
+    // a result the first time this repo actually had E2E output to find.
+    "playwright-report/**",
+    "test-results/**",
   ]),
 ]);
 

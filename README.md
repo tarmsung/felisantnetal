@@ -66,6 +66,7 @@ cp .env.example .env.local
 | `NEXT_PUBLIC_APP_URL` | — | e.g. `http://localhost:3000` |
 | `CRON_SECRET` | Generate one (`openssl rand -hex 32`) | Protects the reminder cron endpoint, added in Phase 5 |
 | `SEED_ADMIN_NAME/EMAIL/PASSWORD` | You choose | Only read by `scripts/seed.ts` |
+| `E2E_ADMIN_EMAIL/PASSWORD`, `E2E_NURSE_EMAIL/PASSWORD` | Disposable staff accounts you create | Only read by `npm run test:e2e` (Phase 10) — never point these at a real clinic login |
 
 Never commit `.env.local`; `.gitignore` already excludes it (and
 explicitly keeps `.env.example` tracked).
@@ -125,6 +126,47 @@ npm run test:e2e     # Playwright E2E — requires .env.local pointed at a
                      # app itself (see playwright.config.ts)
 ```
 
+**Unit tests** are pure logic — no network calls, no Supabase project
+needed.
+
+**E2E tests** (`e2e/*.spec.ts`, Phase 10) exercise real workflows —
+patient registration, appointment scheduling, admin user management —
+against a real, hosted Supabase project. There is no disposable test
+database: every spec cleans up after itself (see `e2e/helpers.ts`), but
+you still need:
+
+- `SUPABASE_SERVICE_ROLE_KEY` in `.env.local` (setup/teardown needs the
+  Admin API — already required to run the app at all).
+- `E2E_ADMIN_EMAIL`/`E2E_ADMIN_PASSWORD` and
+  `E2E_NURSE_EMAIL`/`E2E_NURSE_PASSWORD` — two **disposable** staff
+  accounts, created via `/users` or `scripts/seed.ts`, distinct from any
+  real clinic staff login. Tests that need a role skip themselves with a
+  clear message if the relevant pair isn't set.
+- At least one active community health worker on file (`/community-health-workers`)
+  — patient registration requires picking one, and CHW rows can't be
+  disposed of afterward (see the next paragraph), so the suite reuses
+  whichever one your project already has rather than creating its own.
+
+This schema never truly deletes a health or administrative record, by
+design (see "Security considerations" below) — not even a service-role
+connection can. So cleanup here means the same soft-delete/status
+transitions the app itself uses (a patient's `deleted_at`, an
+appointment's `cancelled` status, a staff account's `inactive` status),
+not a real DELETE. A test-tagged row (`E2E-TEST-...`) can end up
+permanently present-but-invisible in the schema; see `e2e/helpers.ts`'s
+comments for exactly which tables that applies to and why. One
+consequence worth knowing before you run this against a project you
+care about the dashboard numbers of: risk-flag/clinical-visit workflows
+aren't covered by this suite for exactly that reason — those records
+feed the dashboard's live statistics with no filter for soft-deleted
+patients, so a test-triggered risk flag would permanently skew real
+reports, not just leave an inert row.
+
+Playwright's own `webServer` config runs `npm run build && npm run
+start` for you — you don't need a dev server running first (and if one
+already is, it'll reuse it, which is slower for these tests than a
+production build; stop it first for a truly clean run).
+
 ## 9. Production build
 
 ```bash
@@ -153,7 +195,26 @@ store — never baked into the image.
 **Without Docker:** any Node 22+ host works — `npm run build && npm run
 start`, with the same environment variables set.
 
-## 11. WhatsApp integration
+**Health check:** `GET /api/health` (Phase 10) actually queries
+Supabase rather than just confirming the Node process is up — see
+`src/app/api/health/route.ts`. The Dockerfile's own `HEALTHCHECK`
+already points at it; wire the same URL into whatever load
+balancer/orchestrator you deploy behind. It's excluded from
+`proxy.ts`'s auth redirect (a liveness probe has no session cookie) and
+returns `503` rather than a redirect if Supabase is unreachable.
+
+## 11. Continuous integration
+
+`.github/workflows/ci.yml` (Phase 10) runs lint, typecheck, unit tests,
+and a production build on every push/PR — everything that doesn't need
+a real Supabase project. It deliberately does **not** run the
+Playwright E2E suite: those tests touch this clinic's real hosted
+project (see "Running tests" above), which isn't something to do from
+an unattended workflow on every push. Run `npm run test:e2e` locally,
+against a project you're comfortable seeding and cleaning up against,
+before a release.
+
+## 12. WhatsApp integration
 
 Not implemented yet (Phase 5). The architecture is decided in
 [`ARCHITECTURE.md`](ARCHITECTURE.md#notifications-whatsapp-and-later-smsemail):
@@ -161,7 +222,7 @@ a `NotificationService` facade over a swappable provider interface,
 selected by `WHATSAPP_PROVIDER`, so switching WhatsApp providers (or
 adding SMS/email) later doesn't require an application-wide rewrite.
 
-## 12. Backup recommendations
+## 13. Backup recommendations
 
 This app does not implement its own backup mechanism — deliberately: a
 hosted Supabase project already takes automatic Postgres backups
@@ -180,7 +241,7 @@ own. Recommendations for whoever operates this in production:
 - Do not rely on any future PDF/report export feature as a backup
   substitute — it's a user-facing document, not a data backup.
 
-## 13. Security considerations
+## 14. Security considerations
 
 - Authorization is enforced in Postgres via Row Level Security, not
   only in the frontend — see `supabase/migrations/*_rls_policies.sql`
