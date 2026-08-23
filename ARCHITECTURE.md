@@ -24,8 +24,8 @@ one starts.
 | 5 | WhatsApp reminders: notification service, scheduler, delivery logs | **Deferred** — skipped ahead to Phase 6 at the project owner's request; nothing in Phase 6 depends on it |
 | 6 | Dashboard and reports: metrics, charts, filters | **Done** |
 | 7 | PDF generation: patient card, report exports | **Done** |
-| 8 | Administration: users, settings, clinical rule config, audit log viewer | **Done** (this checkpoint) |
-| 9 | Security & optimization pass | Not started |
+| 8 | Administration: users, settings, clinical rule config, audit log viewer | **Done** |
+| 9 | Security & optimization pass | **Done** (this checkpoint) |
 | 10 | Testing & deployment | Ongoing in every phase; hardened at the end |
 
 The sidebar/navigation (`src/lib/navigation.ts`) already lists every
@@ -577,6 +577,141 @@ before Phase 3+ hits the same walls again:
   primitive's internals. Any other still-unexercised `Button
   render={<a/>}>` usage in the codebase is worth the same scrutiny the
   next time it actually renders a *disabled* state for the first time.
+- **A strict Content-Security-Policy cannot be verified against `next
+  dev`.** Found in Phase 9: React dev mode's `eval()` requirement and
+  Turbopack Fast Refresh's inline styles both violate a strict CSP in
+  ways production never hits. Any future change to `proxy.ts`'s
+  `buildCsp()` needs a real `next build && next start` and a browser
+  console check against it — `next dev` will falsely report the policy
+  as broken (or, if loosened to satisfy dev, falsely report a broken
+  policy as fine).
+
+## Phase 9: security & optimization pass
+
+No new feature surface — this phase re-examined everything Phases 1-8
+built. Audited clean, no changes needed:
+
+- **Authorization coverage.** Every page relies on `(app)/layout.tsx`'s
+  shared `requireUser()` guard (or, for the two admin-only pages,
+  additionally checks `role === "administrator"`); every exported Server
+  Action and Route Handler has its own `requireUser()`/`requireAdmin()`
+  call rather than assuming the page above it was guarded — checked by
+  grepping every `page.tsx`, every exported action function, and both
+  Route Handlers (`patients/[id]/card`, `reports/export`) individually,
+  not by sampling.
+- **RLS policy coverage.** All 14 tables have `enable row level
+  security` (migration 0009); none were added since without a matching
+  policy.
+- **PostgREST filter-string injection.** The two `.or()` call sites
+  (`patientService.searchPatients`, `checkDuplicatePatients`) already run
+  user input through `sanitizeForOrFilter()` before interpolating it into
+  the comma/paren-delimited filter string PostgREST parses — re-verified
+  this covers every `.or()` site in the codebase; the one `.ilike()` with
+  unsanitized input (`auditService.listAuditLogs`'s `actionContains`) is
+  safe by construction, since `.ilike()` takes its argument as a single
+  column value, not a parsed filter expression — user input there can
+  only confuse the LIKE pattern's own wildcards, not escape into
+  filtering a different column.
+- **`npm audit`**: 0 vulnerabilities across 923 resolved packages.
+- **Service-role client confinement.** `createSupabaseServiceClient`
+  (bypasses RLS entirely) is only imported from `server-only`-guarded
+  files (`userService.ts`, its own definition) — nowhere that could ship
+  to the client.
+- **No secret logging.** No `console.*` call anywhere references a
+  password/token/secret; no `dangerouslySetInnerHTML` anywhere in the
+  codebase (relevant to the cookie decision below).
+- **N+1 queries.** Every per-item `for`/`.map()` loop in the services
+  layer operates on an already-fetched in-memory array (building a
+  `Map`, computing a diff) — none issues a query per iteration. The
+  batched-`.in()`-lookup pattern established in Phase 2 held throughout.
+
+Real findings, fixed:
+
+- **Open redirect in the login flow.** `loginAction`'s post-login
+  `redirect(next)` only checked `next.startsWith("/")` — but
+  `/login?next=//evil.com` also starts with `/`, and `//evil.com` is
+  parsed by the browser as protocol-relative (same scheme, different
+  host). A crafted link to the real login page, with a normal successful
+  login, would end with the browser sent to an attacker's site — a
+  classic post-login phishing primitive. Fixed by replacing the
+  substring check with an allowlist regex (`^\/[A-Za-z0-9\-_/]*$`) in
+  `resolveSafeNextPath()`: simpler to reason about than trying to
+  enumerate every URL-parser normalization quirk (backslash-as-slash,
+  control-character stripping, etc.) a denylist would need to keep up
+  with, and this app's own `next` values (bare pathnames from
+  `proxy.ts`, no query string) all satisfy it.
+- **Two missing composite indexes** for query patterns added after
+  migration 0008 was written: `users (role, status)` — the
+  "can't demote/deactivate yourself or the last active administrator"
+  guard in `userService.countActiveAdmins` filters both together on
+  every role/status change — and `audit_logs (entity_type, created_at
+  desc)` — the Audit Log viewer filters by entity type and a date range
+  and always sorts by `created_at desc`; the existing `(entity_type,
+  entity_id)` index doesn't serve either. Added in migration
+  **0014** — **apply it via the Supabase SQL Editor**, same as 0013.
+- **No perceived-loading state** on the two pages doing the most
+  server-side work per request (Dashboard's four live aggregate queries
+  plus four charts; Reports' range-scoped aggregation). Added
+  `dashboard/loading.tsx` and `reports/loading.tsx` using the existing
+  `Skeleton` primitive — Next's file-based loading UI shows them
+  immediately on navigation instead of a blank page for that stretch.
+  `recharts` and `@react-pdf/renderer` were already appropriately
+  scoped (chart components are client-only and route-local;
+  `@react-pdf/renderer` is server-only and excluded from the client
+  bundle via `serverExternalPackages`) — no further code-splitting work
+  needed there.
+
+New in this phase, not a fix but new surface — **security headers**
+(`next.config.ts` for the static ones, `proxy.ts` for
+Content-Security-Policy, which needs a fresh value per request):
+
+- `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`,
+  `Referrer-Policy: strict-origin-when-cross-origin`,
+  `Permissions-Policy` denying camera/microphone/geolocation — static,
+  set once in `next.config.ts`.
+- **Content-Security-Policy, production-only, nonce-based for
+  `script-src`.** Verified by actually running `next build && next
+  start` and reading the browser console for violations — not assumed
+  from documentation. Two things came out of that verification that
+  wouldn't have been obvious otherwise:
+  - **It has to be production-only.** Under `next dev` + Turbopack,
+    React's dev-mode stack-reconstruction tooling needs `eval()`, and
+    Fast Refresh injects inline styles Next's own auto-nonce doesn't
+    cover — a strict CSP breaks the dev server outright (confirmed live:
+    dashboard hydration failed, charts never painted). `buildCsp()`
+    branches on `NODE_ENV`, with a permissive dev policy that still
+    blocks genuinely cross-origin `connect-src` destinations.
+  - **`style-src` keeps `'unsafe-inline'` even in production.** Any
+    component using React's `style={{...}}` prop — this codebase's
+    `ChartContainer`, and Base UI's own portal-positioning internals —
+    has it serialized into the initial server-rendered HTML as a
+    literal `style="..."` attribute. That only gets the CSP-exempt
+    treatment (individual CSSOM property assignment, which style-src
+    doesn't govern) on *client-side* re-renders, not on the
+    server-sent markup itself. Next's auto-nonce covers its own
+    script/style tags, not arbitrary components' inline style
+    attributes. `script-src` is still the strict, nonced,
+    `'strict-dynamic'` directive — that's the one that actually stops
+    injected-script XSS, which is the CSP's main point.
+- **Supabase session cookie**: `cookieOptions: { secure: NODE_ENV ===
+  "production" }` added to all three client-construction sites
+  (`lib/supabase/server.ts`, `client.ts`, `proxy.ts`) — `@supabase/ssr`'s
+  own default omits `secure` entirely. `httpOnly` is deliberately left
+  at its library default of `false`: the browser client needs to read
+  this same cookie client-side for auth state, by Supabase's own design.
+  Accepted as a documented trade-off rather than something to "fix" by
+  breaking the client SDK, on the strength of two other facts already
+  true of this codebase: zero `dangerouslySetInnerHTML` call sites (the
+  usual way an attacker would get a script running in the first place),
+  and now a strict production `script-src`.
+- **Login rate-limiting / brute-force posture**: not built here.
+  `loginAction` calls `supabase.auth.signInWithPassword()` directly with
+  no retry or backoff logic of its own, which means Supabase Auth
+  (GoTrue)'s own server-side per-IP/per-account rate limiting is the
+  real protection already in place — the same reasoning as RLS being the
+  real authorization boundary rather than `proxy.ts`. A bespoke limiter
+  would need shared state (Redis/KV) this stack doesn't otherwise have,
+  and would only duplicate protection GoTrue already provides.
 
 ## Notifications (WhatsApp, and later SMS/email)
 

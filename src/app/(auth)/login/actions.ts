@@ -10,6 +10,26 @@ export interface LoginActionState {
 }
 
 /**
+ * `next` round-trips through the URL (proxy.ts sets it from the path a
+ * signed-out visit was redirected from) and this form's hidden field, so
+ * it's attacker-controlled: a crafted /login?next=//evil.com link passes
+ * a bare `startsWith("/") && !startsWith("//")` check on some browsers'
+ * URL parsers anyway, since backslash is normalized to forward-slash for
+ * http(s) URLs — `/\evil.com` or `\\evil.com` still resolve as
+ * protocol-relative, turning a normal login into an open redirect used
+ * for phishing (Phase 9 security pass finding). An allowlist of the
+ * characters this app's real routes ever use is simpler to reason about
+ * than trying to enumerate every parser quirk a denylist would need to
+ * cover; none of this app's routes carry a query string in `next` (see
+ * proxy.ts — only ever a bare pathname), so none is allowed here either.
+ */
+const SAFE_NEXT_PATH = /^\/[A-Za-z0-9\-_/]*$/;
+
+function resolveSafeNextPath(value: FormDataEntryValue | null): string {
+  return typeof value === "string" && SAFE_NEXT_PATH.test(value) ? value : "/dashboard";
+}
+
+/**
  * Server Action backing the login form. Never trusts the client for
  * anything beyond email/password — role/status are re-read from the
  * database after Supabase Auth confirms the credentials.
@@ -60,8 +80,7 @@ export async function loginAction(
     entityId: profile.id,
   });
 
-  const next = formData.get("next");
-  redirect(typeof next === "string" && next.startsWith("/") ? next : "/dashboard");
+  redirect(resolveSafeNextPath(formData.get("next")));
 }
 
 export async function logoutAction(): Promise<void> {

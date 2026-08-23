@@ -19,6 +19,18 @@ export async function createSupabaseServerClient() {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
+      // @supabase/ssr's own default omits `secure` entirely (so the
+      // cookie would ride along on a plain-HTTP request too) — set it
+      // explicitly rather than relying on that default. Not forced on
+      // for dev, since plain `next dev` serves over http://localhost.
+      // `httpOnly` is deliberately left at its default (false): the
+      // browser client (src/lib/supabase/client.ts) needs to read this
+      // same cookie client-side for auth state, by Supabase's own
+      // design — see ARCHITECTURE.md's Phase 9 section for the
+      // accepted-risk reasoning (mitigated by proxy.ts's strict
+      // production script-src CSP and this codebase having zero
+      // dangerouslySetInnerHTML call sites).
+      cookieOptions: { secure: process.env.NODE_ENV === "production" },
       cookies: {
         getAll() {
           return cookieStore.getAll();
