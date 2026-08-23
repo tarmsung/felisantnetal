@@ -197,7 +197,31 @@ store — never baked into the image. See `whatsapp-service/README.md`
 before pairing a real clinic phone number to it.
 
 **Without Docker:** any Node 22+ host works — `npm run build && npm run
-start`, with the same environment variables set.
+start`, with the same environment variables set (`next start` runs, with
+a harmless warning that it's not using the standalone output).
+
+**Without Docker, staying up on its own (PM2):** `ecosystem.config.cjs`
+runs the actual standalone build (not `next start`) for the app plus
+`whatsapp-service`, both under [PM2](https://pm2.keymetrics.io/), which
+restarts either one automatically if it crashes — confirmed live by
+killing the app's process directly and watching PM2 bring it back
+within seconds, session/pairing state intact.
+
+```bash
+npm install -g pm2   # once
+npm run pm2:start    # builds both, then starts both under PM2
+pm2 status           # confirm both are "online"
+pm2 logs             # tail both processes' output
+pm2 save             # persist this process list for `pm2 resurrect`
+```
+
+After a code change, PM2 won't rebuild for you — use `npm run
+pm2:restart` (rebuilds both, then restarts both), not a bare `pm2
+restart`. `pm2 save` persists the process *list*, not a boot-time
+launcher — surviving an actual machine reboot needs a Windows service
+registered via a tool like `pm2-windows-startup`, which this repo
+doesn't set up automatically since installing a system service is a
+bigger, harder-to-reverse step than restarting a crashed process.
 
 **Health check:** `GET /api/health` (Phase 10) actually queries
 Supabase rather than just confirming the Node process is up — see

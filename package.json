@@ -6,11 +6,14 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "build:standalone": "next build && node scripts/prepare-standalone.mjs",
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "db:seed": "tsx scripts/seed.ts"
+    "db:seed": "tsx scripts/seed.ts",
+    "pm2:start": "npm run build:standalone && cd whatsapp-service && npm run build && cd .. && pm2 start ecosystem.config.cjs",
+    "pm2:restart": "npm run build:standalone && pm2 restart felis-clinic && cd whatsapp-service && npm run build && cd .. && pm2 restart whatsapp-service"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

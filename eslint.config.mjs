@@ -25,6 +25,10 @@ const eslintConfig = defineConfig([
     // that happen to start with "use" (e.g. Baileys' own
     // useMultiFileAuthState), which isn't a React hook at all.
     "whatsapp-service/**",
+    // PM2's own config-file convention is CommonJS (.cjs, require()) —
+    // not the app's ESM source, so the TS-project's no-require-imports
+    // rule doesn't apply to it.
+    "ecosystem.config.cjs",
   ]),
 ]);
 
