@@ -23,8 +23,8 @@ one starts.
 | 4 | Clinical records: visit recording, validation, risk flag engine | **Done** |
 | 5 | WhatsApp reminders: notification service, scheduler, delivery logs | **Deferred** — skipped ahead to Phase 6 at the project owner's request; nothing in Phase 6 depends on it |
 | 6 | Dashboard and reports: metrics, charts, filters | **Done** |
-| 7 | PDF generation: patient card, report exports | **Done** (this checkpoint) |
-| 8 | Administration: users, settings, clinical rule config, audit log viewer | Not started |
+| 7 | PDF generation: patient card, report exports | **Done** |
+| 8 | Administration: users, settings, clinical rule config, audit log viewer | **Done** (this checkpoint) |
 | 9 | Security & optimization pass | Not started |
 | 10 | Testing & deployment | Ongoing in every phase; hardened at the end |
 
@@ -299,6 +299,54 @@ rows are capped at 300 with a visible "showing first N of M" note
 (never a silent truncation) — a PDF is for a readable printout, not a
 full data dump; `Export CSV` is the tool for that.
 
+## The Administration module: users, settings, and the audit log viewer
+
+Three mostly-independent pieces, all administrator-only (spec section
+35) and all straightforward CRUD over tables that have existed since
+Phase 1 — the interesting decisions are in what happens at the edges.
+
+**Users.** `userService.createStaffUser()` was already written in Phase
+1 (it needs the service-role client's Admin API to create the
+`auth.users` row, so it had to exist before login did); Phase 8 adds
+the admin-facing role/status/password-reset operations and the page
+around all of it. Two safety rails matter more than the CRUD itself:
+an administrator can't demote or deactivate **themselves** (they'd
+lose the access needed to undo it), and can't demote or deactivate the
+clinic's **last active administrator** (nobody left who could fix it).
+Both are enforced in `userService.ts` itself, not just hidden in the
+UI — `updateUserRole`/`updateUserStatus` re-check them server-side
+regardless of what the client sent. There's no self-service "forgot
+password" flow (that needs an email provider this project doesn't
+have); an administrator sets a new temporary password directly
+(`resetUserPassword`, via the same Admin API) and relays it out of
+band, same as account creation.
+
+**Settings.** Four independent config surfaces behind one tabbed page:
+clinic details (`settingsService.ts`, moved here from Phase 7's
+`pdfService.tsx`, which now just consumes it), the ANC schedule
+(`ancService.listAllAncScheduleTemplates`/`updateAncScheduleTemplate`),
+clinical rules (`riskService.listAllClinicalRules`/`updateClinicalRule`),
+and notification templates/delivery settings (`notificationService.ts`,
+built out now as *configuration only* — Phase 5 still owns actually
+sending anything). The clinical rules form enforces the same threshold
+convention `riskRules.ts` documents: activating a rule whose operator
+needs a threshold it doesn't have (e.g. turning on an `outside` rule
+with only a minimum set) is rejected server-side with a specific
+error, rather than silently saving a rule that can pass validation but
+then never fire — a misconfiguration that would otherwise be
+invisible until someone wondered why a rule "isn't working" months
+later.
+
+**Audit log viewer.** `auditService.listAuditLogs()` generalizes the
+per-patient audit tab's query (Phase 2/4) into a global, paginated,
+filterable one — same admin-only RLS, same actor-name-batching helper
+(now shared as `attachActorNames` instead of duplicated). Its date
+range control reuses the Reports page's `DateRangeFilter` rather than
+building a second date picker, extended with a `presets`/`defaultPreset`
+prop so the audit log can default to "All time" (an administrator
+investigating an incident is just as likely to be looking for last
+month as last week) while Reports keeps defaulting to "Last 30 days".
+
 ## Clinic timezone handling
 
 Every other date in this schema (`date_of_birth`, EDD, LMP,
@@ -510,22 +558,48 @@ before Phase 3+ hits the same walls again:
   does for edited existing files. If a route you just added 404s with
   nothing in the server log explaining why, restart the dev server
   before assuming the route logic itself is wrong.
+- **shadcn's `Pagination` composes Base UI's `<Button render={<a/>}>`
+  polymorphism, and that composition's server/client prop merge can
+  disagree.** Found live (Phase 8): the Audit Log viewer was the first
+  page in the whole app to ever actually reach a second page (every
+  earlier paginated list — Patients, Missed Visits — stayed within one
+  page of test data), and its "Previous"/"Next" links immediately threw
+  a hydration-mismatch warning: the server rendered `data-slot="button"`
+  with `tabIndex="0"`, the client wanted `data-slot="pagination-link"`
+  with `tabIndex={-1}` (`aria-disabled` differs between an enabled and
+  disabled pagination link, and that recomputation apparently also
+  reorders how Base UI's internals merge the two components' other
+  props). Fixed by not composing them at all: `PaginationLink` now
+  renders a plain `<a>` styled with `buttonVariants(...)` classes
+  directly — correct anyway, since a pagination control is semantically
+  a link, not a button pretending to be one — which sidesteps the
+  mismatch entirely rather than chasing it through a third-party
+  primitive's internals. Any other still-unexercised `Button
+  render={<a/>}>` usage in the codebase is worth the same scrutiny the
+  next time it actually renders a *disabled* state for the first time.
 
 ## Notifications (WhatsApp, and later SMS/email)
 
-Not built yet (Phase 5), but the shape is decided so schema and UI don't
-have to change when it lands: `notificationService` will be a thin
-facade over a `NotificationProvider` interface (`send(to, body) ->
-{success, providerMessageId?, error?}`), selected at runtime by the
-`WHATSAPP_PROVIDER` env var. The reminder scheduler and any "send
-reminder now" button call the facade, never a specific provider's SDK —
-swapping providers later is a new file implementing the interface plus
-one env var change, not an application-wide rewrite. Message templates
-are stored in `notification_templates` (editable by an administrator,
-section 35) and rendered with `{{token}}` substitution; the rendered
-text intentionally excludes diagnosis, measurements and risk detail
-(section 9) by construction — the template can't reference fields the
-renderer doesn't pass it.
+The *sending* half isn't built yet (Phase 5), but the shape is decided
+so schema and UI don't have to change when it lands, and the
+*configuration* half — template text and delivery timing — was built
+early, in Phase 8's Settings module, since an administrator being able
+to see and edit those doesn't depend on anything actually being sent:
+`notificationService.ts` already exposes
+`listNotificationTemplates`/`updateNotificationTemplate` and
+`getNotificationSettings`/`updateNotificationSettings` (rendered by
+`components/settings/notification-settings-section.tsx`). What Phase 5
+adds on top is a thin facade over a `NotificationProvider` interface
+(`send(to, body) -> {success, providerMessageId?, error?}`), selected
+at runtime by the `whatsapp_provider` setting (already a configurable
+field, currently unused). The reminder scheduler and any "send
+reminder now" button will call the facade, never a specific provider's
+SDK — swapping providers later is a new file implementing the interface
+plus one setting change, not an application-wide rewrite. Message
+templates render with `{{token}}` substitution; the rendered text
+intentionally excludes diagnosis, measurements and risk detail (section
+9) by construction — the template can't reference fields the renderer
+doesn't pass it.
 
 ## Testing
 

@@ -1,7 +1,8 @@
 import * as React from "react"
 
 import { cn } from "@/lib/utils"
-import { Button } from "@/components/ui/button"
+import { buttonVariants } from "@/components/ui/button"
+import type { VariantProps } from "class-variance-authority"
 import { ChevronLeftIcon, ChevronRightIcon, MoreHorizontalIcon } from "lucide-react"
 
 function Pagination({ className, ...props }: React.ComponentProps<"nav">) {
@@ -35,9 +36,20 @@ function PaginationItem({ ...props }: React.ComponentProps<"li">) {
 
 type PaginationLinkProps = {
   isActive?: boolean
-} & Pick<React.ComponentProps<typeof Button>, "size"> &
-  React.ComponentProps<"a">
+  size?: VariantProps<typeof buttonVariants>["size"]
+} & React.ComponentProps<"a">
 
+/**
+ * A plain `<a>` styled with the button variant classes directly, not
+ * Base UI's `<Button render={<a/>}>` composition — that composition's
+ * server/client prop merge disagreed on `data-slot`/`tabIndex` for a
+ * conditionally-disabled link (found live, Phase 8: the first page
+ * with real multi-page pagination — every earlier list stayed on one
+ * page, so this hydration mismatch had nothing to trigger it before).
+ * A pagination link is semantically an `<a>` regardless, so rendering
+ * it directly sidesteps the mismatch entirely instead of chasing it
+ * through Base UI's internals.
+ */
 function PaginationLink({
   className,
   isActive,
@@ -45,19 +57,12 @@ function PaginationLink({
   ...props
 }: PaginationLinkProps) {
   return (
-    <Button
-      variant={isActive ? "outline" : "ghost"}
-      size={size}
-      className={cn(className)}
-      nativeButton={false}
-      render={
-        <a
-          aria-current={isActive ? "page" : undefined}
-          data-slot="pagination-link"
-          data-active={isActive}
-          {...props}
-        />
-      }
+    <a
+      aria-current={isActive ? "page" : undefined}
+      data-slot="pagination-link"
+      data-active={isActive}
+      className={cn(buttonVariants({ variant: isActive ? "outline" : "ghost", size }), className)}
+      {...props}
     />
   )
 }
@@ -66,7 +71,7 @@ function PaginationPrevious({
   className,
   text = "Previous",
   ...props
-}: React.ComponentProps<typeof PaginationLink> & { text?: string }) {
+}: Omit<React.ComponentProps<typeof PaginationLink>, "size"> & { text?: string }) {
   return (
     <PaginationLink
       aria-label="Go to previous page"
@@ -84,7 +89,7 @@ function PaginationNext({
   className,
   text = "Next",
   ...props
-}: React.ComponentProps<typeof PaginationLink> & { text?: string }) {
+}: Omit<React.ComponentProps<typeof PaginationLink>, "size"> & { text?: string }) {
   return (
     <PaginationLink
       aria-label="Go to next page"

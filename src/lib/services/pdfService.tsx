@@ -1,9 +1,9 @@
 import "server-only";
 import { renderToBuffer } from "@react-pdf/renderer";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getPatientById, getLatestPregnancy, getCommunityHealthWorkerName } from "@/lib/services/patientService";
 import { listVisitsForPatient } from "@/lib/services/clinicalVisitService";
 import { listAppointmentsForPatient } from "@/lib/services/appointmentService";
+import { getClinicSettings } from "@/lib/services/settingsService";
 import {
   getAttendanceReport,
   getMissedVisitReport,
@@ -13,7 +13,6 @@ import {
 import { formatDisplayDate, formatClinicDateTime } from "@/lib/dates";
 import { PatientCardDocument } from "@/lib/pdf/PatientCardDocument";
 import { ReportDocument, type ReportPdfData } from "@/lib/pdf/ReportDocument";
-import type { ClinicSettingsRow } from "@/types/database";
 
 /**
  * Phase 7 (spec section 43): PDF generation — the patient ANC card and
@@ -26,14 +25,10 @@ import type { ClinicSettingsRow } from "@/types/database";
  * only place that touches @react-pdf/renderer's `renderToBuffer`; the
  * route handlers in app/(app)/.../route.ts just call these functions
  * and stream the result. `.tsx` (not `.ts`) because it renders JSX
- * directly into `renderToBuffer`.
+ * directly into `renderToBuffer`. Clinic settings now live in
+ * settingsService.ts (Phase 8, which also builds the admin UI to edit
+ * them) — this file just consumes it.
  */
-
-export async function getClinicSettings(): Promise<ClinicSettingsRow | null> {
-  const supabase = await createSupabaseServerClient();
-  const { data } = await supabase.from("clinic_settings").select("*").eq("id", true).maybeSingle();
-  return data ?? null;
-}
 
 export async function generatePatientCardPdf(
   patientId: string,

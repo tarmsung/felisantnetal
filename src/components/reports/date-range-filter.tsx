@@ -12,12 +12,29 @@ import {
 } from "@/components/ui/select";
 import { REPORT_RANGE_PRESETS } from "@/lib/reportRange";
 
-/** URL-param-driven date range picker shared by every report tab (preset dropdown + custom start/end when "Custom range" is chosen). Preserves whatever other params are already on the URL (e.g. `type`). */
-export function DateRangeFilter() {
+/**
+ * URL-param-driven date range picker shared by every report-style tab
+ * (preset dropdown + custom start/end when "Custom range" is chosen).
+ * Preserves whatever other params are already on the URL (e.g. `type`).
+ * `presets`/`defaultPreset`/`defaultLabel` let a caller offer a
+ * different preset list — the Audit Log viewer adds an "All time"
+ * entry and defaults to it, since (unlike a Reports page) there's no
+ * reason an audit trail should default to hiding everything older than
+ * 30 days.
+ */
+export function DateRangeFilter({
+  presets = REPORT_RANGE_PRESETS,
+  defaultPreset = "30d",
+  defaultLabel = "Last 30 days",
+}: {
+  presets?: Array<{ value: string; label: string }>;
+  defaultPreset?: string;
+  defaultLabel?: string;
+}) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const preset = searchParams.get("preset") ?? "30d";
+  const preset = searchParams.get("preset") ?? defaultPreset;
 
   function updateParams(patch: Record<string, string | null>) {
     const params = new URLSearchParams(searchParams.toString());
@@ -32,14 +49,17 @@ export function DateRangeFilter() {
     <div className="flex flex-wrap items-end gap-3">
       <div className="grid gap-1.5">
         <Label className="text-xs">Date range</Label>
-        <Select value={preset} onValueChange={(value) => updateParams({ preset: value })}>
+        <Select
+          value={preset}
+          onValueChange={(value) => updateParams({ preset: value === defaultPreset ? null : value })}
+        >
           <SelectTrigger className="w-44">
             <SelectValue>
-              {(value: string) => REPORT_RANGE_PRESETS.find((o) => o.value === value)?.label ?? "Last 30 days"}
+              {(value: string) => presets.find((o) => o.value === value)?.label ?? defaultLabel}
             </SelectValue>
           </SelectTrigger>
           <SelectContent>
-            {REPORT_RANGE_PRESETS.map((option) => (
+            {presets.map((option) => (
               <SelectItem key={option.value} value={option.value}>
                 {option.label}
               </SelectItem>

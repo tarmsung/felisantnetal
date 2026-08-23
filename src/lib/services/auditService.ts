@@ -83,6 +83,26 @@ export interface AuditLogEntry extends AuditLogRow {
   actor_name: string | null;
 }
 
+/** Same "fetch, then one batched `.in()` lookup" pattern used throughout (appointmentService, clinicalVisitService) — no postgrest embedding, see types/database.ts. A null user_id (system-initiated entries, e.g. sweepMissedAppointments) reads as "System", never "Unknown". */
+async function attachActorNames(
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
+  rows: AuditLogRow[],
+): Promise<AuditLogEntry[]> {
+  if (rows.length === 0) return [];
+  const userIds = Array.from(new Set(rows.map((row) => row.user_id).filter((id): id is string => Boolean(id))));
+
+  const nameById = new Map<string, string>();
+  if (userIds.length > 0) {
+    const { data: users } = await supabase.from("users").select("id, full_name").in("id", userIds);
+    for (const u of users ?? []) nameById.set(u.id, u.full_name);
+  }
+
+  return rows.map((row) => ({
+    ...row,
+    actor_name: row.user_id ? (nameById.get(row.user_id) ?? "Unknown user") : "System",
+  }));
+}
+
 /**
  * Backs the "Audit History" tab on a patient's profile (spec section
  * 6). RLS (audit_logs_select_admin, migration 0009) restricts SELECT
@@ -104,22 +124,61 @@ export async function listAuditLogsForEntity(
     .order("created_at", { ascending: false });
 
   if (error || !data) return [];
+  return attachActorNames(supabase, data);
+}
 
-  const userIds = Array.from(
-    new Set(data.map((row) => row.user_id).filter((id): id is string => Boolean(id))),
-  );
+export interface AuditLogFilters {
+  entityType?: string;
+  userId?: string;
+  /** Matches AuditLogInput.action by substring, e.g. "update" matches "patient.update" and "user.update_role". */
+  actionContains?: string;
+  startIso?: string;
+  endIso?: string;
+}
 
-  const nameById = new Map<string, string>();
-  if (userIds.length > 0) {
-    const { data: users } = await supabase
-      .from("users")
-      .select("id, full_name")
-      .in("id", userIds);
-    for (const u of users ?? []) nameById.set(u.id, u.full_name);
-  }
+const AUDIT_LOG_PAGE_SIZE = 25;
 
-  return data.map((row) => ({
-    ...row,
-    actor_name: row.user_id ? (nameById.get(row.user_id) ?? "Unknown user") : "System",
-  }));
+export interface ListAuditLogsResult {
+  rows: AuditLogEntry[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+/** Backs the global Audit Log viewer (spec section 6/35, Phase 8) — every entity type, not scoped to one record. Same admin-only RLS as listAuditLogsForEntity. */
+export async function listAuditLogs(filters: AuditLogFilters = {}, page = 1): Promise<ListAuditLogsResult> {
+  const supabase = await createSupabaseServerClient();
+  const safePage = Math.max(1, page);
+  const from = (safePage - 1) * AUDIT_LOG_PAGE_SIZE;
+  const to = from + AUDIT_LOG_PAGE_SIZE - 1;
+
+  let builder = supabase.from("audit_logs").select("*", { count: "exact" });
+  if (filters.entityType) builder = builder.eq("entity_type", filters.entityType);
+  if (filters.userId) builder = builder.eq("user_id", filters.userId);
+  if (filters.actionContains) builder = builder.ilike("action", `%${filters.actionContains}%`);
+  if (filters.startIso) builder = builder.gte("created_at", filters.startIso);
+  if (filters.endIso) builder = builder.lt("created_at", filters.endIso);
+
+  const { data, error, count } = await builder.order("created_at", { ascending: false }).range(from, to);
+  if (error) throw new Error(`Failed to load audit logs: ${error.message}`);
+
+  const rows = await attachActorNames(supabase, data ?? []);
+  return { rows, total: count ?? 0, page: safePage, pageSize: AUDIT_LOG_PAGE_SIZE };
+}
+
+/** Every entity_type ever logged — feeds the Audit Log viewer's filter dropdown without hardcoding a list that drifts as new modules add new action types. */
+export async function listAuditLogEntityTypes(): Promise<string[]> {
+  const supabase = await createSupabaseServerClient();
+  // PostgREST has no SELECT DISTINCT — dedup client-side over the most
+  // recent slice instead of the whole table (which only ever grows).
+  // Every entity type this app logs shows up well within the most
+  // recent 5,000 entries at a single clinic's write volume; a type that
+  // hasn't been used in that long isn't worth a filter option anyway.
+  const { data, error } = await supabase
+    .from("audit_logs")
+    .select("entity_type")
+    .order("created_at", { ascending: false })
+    .limit(5000);
+  if (error || !data) return [];
+  return Array.from(new Set(data.map((row) => row.entity_type))).sort();
 }

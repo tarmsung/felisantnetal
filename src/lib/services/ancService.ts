@@ -1,6 +1,7 @@
 import "server-only";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { addDaysToIsoDate } from "@/lib/dates";
+import { logAuditEvent, diffForAudit } from "@/lib/services/auditService";
 import type { AncScheduleTemplateRow, PregnancyRow } from "@/types/database";
 
 /**
@@ -24,6 +25,57 @@ export async function getActiveScheduleTemplates(): Promise<AncScheduleTemplateR
 
   if (error) throw new Error(`Failed to load ANC schedule configuration: ${error.message}`);
   return data ?? [];
+}
+
+/** Backs the Settings page's ANC Schedule tab (Phase 8) — every configured slot, active or not, so an administrator can see and fix a mistakenly-deactivated one. */
+export async function listAllAncScheduleTemplates(): Promise<AncScheduleTemplateRow[]> {
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase.from("anc_schedule_templates").select("*").order("visit_number");
+  if (error) throw new Error(`Failed to load ANC schedule configuration: ${error.message}`);
+  return data ?? [];
+}
+
+export interface UpdateAncScheduleTemplateInput {
+  recommendedGestationalWeek?: number;
+  isActive: boolean;
+  notes?: string;
+}
+
+export async function updateAncScheduleTemplate(
+  id: string,
+  input: UpdateAncScheduleTemplateInput,
+  actingAdminId: string,
+): Promise<void> {
+  const supabase = await createSupabaseServerClient();
+  const { data: before, error: fetchError } = await supabase
+    .from("anc_schedule_templates")
+    .select("*")
+    .eq("id", id)
+    .single();
+  if (fetchError || !before) throw new Error(`Schedule slot not found: ${fetchError?.message ?? "unknown error"}`);
+
+  const { error } = await supabase
+    .from("anc_schedule_templates")
+    .update({
+      recommended_gestational_week: input.recommendedGestationalWeek ?? null,
+      is_active: input.isActive,
+      notes: input.notes ?? null,
+      updated_by: actingAdminId,
+    })
+    .eq("id", id);
+  if (error) throw new Error(`Failed to update schedule slot: ${error.message}`);
+
+  const { data: after } = await supabase.from("anc_schedule_templates").select("*").eq("id", id).maybeSingle();
+  const diff = after ? diffForAudit(before, after) : null;
+  if (diff) {
+    await logAuditEvent({
+      userId: actingAdminId,
+      action: "anc_schedule_template.update",
+      entityType: "anc_schedule_template",
+      entityId: id,
+      ...diff,
+    });
+  }
 }
 
 export interface NextVisitSuggestion {

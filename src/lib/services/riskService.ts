@@ -1,6 +1,6 @@
 import "server-only";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { logAuditEvent } from "@/lib/services/auditService";
+import { logAuditEvent, diffForAudit } from "@/lib/services/auditService";
 import { evaluateVisitAgainstRules } from "@/lib/services/riskRules";
 import type {
   ClinicalRuleRow,
@@ -36,6 +36,78 @@ export async function getActiveClinicalRules(): Promise<ClinicalRuleRow[]> {
 
   if (error) throw new Error(`Failed to load clinical rules: ${error.message}`);
   return data ?? [];
+}
+
+/** Backs the Settings page's Clinical Rules tab (Phase 8) — all five configured slots, active or not. */
+export async function listAllClinicalRules(): Promise<ClinicalRuleRow[]> {
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase.from("clinical_rules").select("*").order("field");
+  if (error) throw new Error(`Failed to load clinical rules: ${error.message}`);
+  return data ?? [];
+}
+
+export interface UpdateClinicalRuleInput {
+  thresholdMin?: number;
+  thresholdMax?: number;
+  severity: RiskSeverity;
+  isActive: boolean;
+}
+
+/** Whether `rule.operator` has every threshold it needs to ever evaluate to true — see riskRules.ts's documented threshold convention. */
+function hasRequiredThresholds(operator: ClinicalRuleRow["operator"], min?: number, max?: number): boolean {
+  if (operator === "between" || operator === "outside") return min != null && max != null;
+  return min != null;
+}
+
+/**
+ * Activating a rule with thresholds its own operator can't use would
+ * pass validation but then never fire (riskRules.evaluateRule fails
+ * safe on a missing threshold) — a silent, hard-to-notice
+ * misconfiguration. Caught here instead of left for a nurse to
+ * eventually wonder why a rule "isn't working".
+ */
+export async function updateClinicalRule(
+  id: string,
+  input: UpdateClinicalRuleInput,
+  actingAdminId: string,
+): Promise<void> {
+  const supabase = await createSupabaseServerClient();
+  const { data: before, error: fetchError } = await supabase
+    .from("clinical_rules")
+    .select("*")
+    .eq("id", id)
+    .single();
+  if (fetchError || !before) throw new Error(`Rule not found: ${fetchError?.message ?? "unknown error"}`);
+
+  if (input.isActive && !hasRequiredThresholds(before.operator, input.thresholdMin, input.thresholdMax)) {
+    const needed = before.operator === "between" || before.operator === "outside" ? "a minimum and a maximum" : "a minimum";
+    throw new Error(`This rule's "${before.operator}" comparison needs ${needed} threshold before it can be activated.`);
+  }
+
+  const { error } = await supabase
+    .from("clinical_rules")
+    .update({
+      threshold_min: input.thresholdMin ?? null,
+      threshold_max: input.thresholdMax ?? null,
+      severity: input.severity,
+      is_active: input.isActive,
+      version: before.version + 1,
+      updated_by: actingAdminId,
+    })
+    .eq("id", id);
+  if (error) throw new Error(`Failed to update rule: ${error.message}`);
+
+  const { data: after } = await supabase.from("clinical_rules").select("*").eq("id", id).maybeSingle();
+  const diff = after ? diffForAudit(before, after) : null;
+  if (diff) {
+    await logAuditEvent({
+      userId: actingAdminId,
+      action: "clinical_rule.update",
+      entityType: "clinical_rule",
+      entityId: id,
+      ...diff,
+    });
+  }
 }
 
 /**
