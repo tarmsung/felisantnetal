@@ -810,6 +810,17 @@ was built early, in Phase 8's Settings module, since an administrator
 being able to see and edit those doesn't depend on anything actually
 being sent. This phase adds the actual sending path.
 
+**Verified live, with a real device, not just plausible-on-paper**: the
+project owner scanned the pairing QR from Settings with a real phone,
+the connection card flipped to "Connected," and a reminder sent through
+the actual "Send reminder now" button (not a script) arrived as a real
+WhatsApp message — confirmed by the recipient. `reminders`,
+`appointments.reminder_status`, and `audit_logs` all recorded it
+correctly (a real `provider_message_id` came back from WhatsApp, not a
+mocked one). Migration 0015 was applied the same session — the Clinic
+Details tab's "Save" button, which writes
+`default_phone_country_code`, was re-verified afterward too.
+
 **⚠️ Read before pairing a real clinic phone number**: the sending
 mechanism is [`@whiskeysockets/baileys`](https://github.com/WhiskeySockets/Baileys),
 an unofficial, reverse-engineered WhatsApp Web client — not the
