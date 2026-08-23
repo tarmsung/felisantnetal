@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Pencil, Phone } from "lucide-react";
+import { Pencil, Phone, FileDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { RiskBadge } from "@/components/shared/risk-badge";
 import { PatientStatusBadge } from "@/components/patients/patient-status-badge";
@@ -56,14 +56,24 @@ export function PatientHeader({
         </div>
       </div>
 
-      <Button
-        render={<Link href={`/patients/${patient.id}/edit`} />}
-        nativeButton={false}
-        variant="outline"
-      >
-        <Pencil className="h-4 w-4" />
-        Edit
-      </Button>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          render={<a href={`/patients/${patient.id}/card`} target="_blank" rel="noopener noreferrer" />}
+          nativeButton={false}
+          variant="outline"
+        >
+          <FileDown className="h-4 w-4" />
+          ANC Card
+        </Button>
+        <Button
+          render={<Link href={`/patients/${patient.id}/edit`} />}
+          nativeButton={false}
+          variant="outline"
+        >
+          <Pencil className="h-4 w-4" />
+          Edit
+        </Button>
+      </div>
     </div>
   );
 }

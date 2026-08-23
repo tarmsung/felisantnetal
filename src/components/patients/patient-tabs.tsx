@@ -1,7 +1,6 @@
 "use client";
 
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { ComingSoon } from "@/components/shared/coming-soon";
 
 export function PatientTabs({
   overview,
@@ -9,6 +8,7 @@ export function PatientTabs({
   appointments,
   clinicalHistory,
   riskFlags,
+  documents,
   auditHistory,
 }: {
   overview: React.ReactNode;
@@ -16,6 +16,7 @@ export function PatientTabs({
   appointments: React.ReactNode;
   clinicalHistory: React.ReactNode;
   riskFlags: React.ReactNode;
+  documents: React.ReactNode;
   /** Omitted entirely (not just empty) for non-administrators — RLS hides the underlying data too. */
   auditHistory?: React.ReactNode;
 }) {
@@ -47,7 +48,7 @@ export function PatientTabs({
         {riskFlags}
       </TabsContent>
       <TabsContent value="documents" className="pt-4">
-        <ComingSoon moduleName="Downloadable patient documents" phase={7} />
+        {documents}
       </TabsContent>
       {auditHistory ? (
         <TabsContent value="audit" className="pt-4">

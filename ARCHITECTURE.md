@@ -22,8 +22,8 @@ one starts.
 | 3 | ANC scheduling: engine, calendar, rescheduling, missed visits | **Done** |
 | 4 | Clinical records: visit recording, validation, risk flag engine | **Done** |
 | 5 | WhatsApp reminders: notification service, scheduler, delivery logs | **Deferred** — skipped ahead to Phase 6 at the project owner's request; nothing in Phase 6 depends on it |
-| 6 | Dashboard and reports: metrics, charts, filters | **Done** (this checkpoint) |
-| 7 | PDF generation: patient card, report exports | Not started |
+| 6 | Dashboard and reports: metrics, charts, filters | **Done** |
+| 7 | PDF generation: patient card, report exports | **Done** (this checkpoint) |
 | 8 | Administration: users, settings, clinical rule config, audit log viewer | Not started |
 | 9 | Security & optimization pass | Not started |
 | 10 | Testing & deployment | Ongoing in every phase; hardened at the end |
@@ -262,6 +262,43 @@ underlying flat rows, so the Reports page's CSV export
 fetched server-side — no second round trip just to reformat what the
 page already has.
 
+## PDF generation: the patient card and report exports
+
+`lib/pdf/` holds every `@react-pdf/renderer` template
+(`PatientCardDocument.tsx`, `ReportDocument.tsx`) as plain components
+built from react-pdf's own primitives (`Document`/`Page`/`View`/`Text`)
+and its own flexbox-ish `StyleSheet` — these render to a PDF byte
+stream, not the DOM, so they cannot import or reuse the app's regular
+Tailwind components, and `lib/pdf/styles.ts` duplicates the brand's hex
+colors by hand for exactly that reason (no shared token source between
+a browser stylesheet and a PDF renderer). `lib/services/pdfService.tsx`
+is the only file that calls `renderToBuffer`; two thin Route Handlers
+(`patients/[id]/card/route.ts`, `reports/export/route.ts`) call it and
+stream the result with `Content-Type: application/pdf` — a Server
+Action can't return raw binary, so this is a Route Handler, not an
+action, on purpose.
+
+**What the patient card deliberately leaves out** (spec section 16,
+"no unnecessary sensitive detail"): `clinical_notes` (free-text staff
+narrative) and everything about `risk_flags` — severity, reason,
+status. It prints exactly the five objective measurements a visit
+produced (weight, BP, fundal height, FHR, Hb, the same fields
+`riskService` evaluates) and nothing about what those numbers might
+mean clinically. A missing LMP means gestational age prints as "—", not
+a guess — same "never invent, always say why it's blank" rule as the
+scheduling and rules engines.
+
+**Report PDFs reuse `reportService` directly** — `pdfService`'s
+`generateReportPdf` calls the exact same `getAttendanceReport`/
+`getHighRiskReport`/`getMissedVisitReport`/`getPatientSummaryReport`
+functions the Reports page and its CSV export already call, then maps
+each report's shape into `ReportDocument`'s generic
+`{metrics, tableHeaders, tableRows}` props — one template serves all
+four report types rather than four near-identical PDF layouts. Printed
+rows are capped at 300 with a visible "showing first N of M" note
+(never a silent truncation) — a PDF is for a readable printout, not a
+full data dump; `Export CSV` is the tool for that.
+
 ## Clinic timezone handling
 
 Every other date in this schema (`date_of_birth`, EDD, LMP,
@@ -449,6 +486,30 @@ before Phase 3+ hits the same walls again:
   content column and `<main>` itself — the fix belongs in the shared
   shell, not the one table, since the next long string (a clinical note,
   an audit log diff) would trip the same failure anywhere else in the app.
+- **`@react-pdf/renderer`'s layout engine loads a WASM binary
+  (`yoga-layout`) that a bundler can mishandle.** Added
+  `serverExternalPackages: ["@react-pdf/renderer"]` to `next.config.ts`
+  proactively (spec section 43/Phase 7) so Turbopack/webpack never tries
+  to bundle it — it's kept external and `require`d/`import`ed by Node
+  directly instead, sidestepping a whole class of "WASM instantiation
+  failed" errors this class of package is known for in bundled server
+  environments.
+- **`NextResponse`'s body type doesn't accept a Node `Buffer` directly.**
+  `renderToBuffer()` returns a `Buffer`, but `new NextResponse(buffer,
+  ...)` fails to typecheck (`Buffer<ArrayBufferLike>` isn't `BodyInit`)
+  even though a `Buffer` *is* a `Uint8Array` at runtime. Fixed by
+  wrapping it — `new NextResponse(new Uint8Array(buffer), ...)` — a
+  zero-copy view, not a real conversion, that just satisfies the type.
+- **A route file added while the dev server is already running can
+  404 even though the code is correct.** Hit live testing the new
+  `patients/[id]/card/route.ts`: it 404'd on first request, with no
+  compile error logged, and the fix was an unrelated-looking `rm -rf
+  .next` + full dev-server restart — after that it worked first try
+  with no code changes. Turbopack's route manifest apparently doesn't
+  always pick up a brand-new Route Handler file mid-session the way it
+  does for edited existing files. If a route you just added 404s with
+  nothing in the server log explaining why, restart the dev server
+  before assuming the route logic itself is wrong.
 
 ## Notifications (WhatsApp, and later SMS/email)
 

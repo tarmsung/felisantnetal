@@ -18,6 +18,7 @@ import { PatientAppointments } from "@/components/patients/patient-appointments"
 import { PatientVisits } from "@/components/patients/patient-visits";
 import { PatientClinicalHistory } from "@/components/patients/patient-clinical-history";
 import { PatientRiskFlags } from "@/components/patients/patient-risk-flags";
+import { PatientDocuments } from "@/components/patients/patient-documents";
 import { PatientAuditHistory } from "@/components/patients/patient-audit-history";
 import { PatientTabs } from "@/components/patients/patient-tabs";
 import { SetPageHeader } from "@/components/layout/set-page-header";
@@ -88,6 +89,7 @@ export default async function PatientProfilePage({
         }
         clinicalHistory={<PatientClinicalHistory visits={visits} flags={riskFlags} />}
         riskFlags={<PatientRiskFlags patientId={patient.id} flags={riskFlags} />}
+        documents={<PatientDocuments patientId={patient.id} />}
         auditHistory={
           auditEntries ? <PatientAuditHistory entries={auditEntries} /> : undefined
         }

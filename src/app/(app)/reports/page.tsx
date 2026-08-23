@@ -16,6 +16,7 @@ import { StatusBreakdownChart } from "@/components/reports/status-breakdown-char
 import { RiskSeverityChart } from "@/components/reports/risk-severity-chart";
 import { RegistrationTrendChart } from "@/components/reports/registration-trend-chart";
 import { ExportCsvButton } from "@/components/reports/export-csv-button";
+import { ExportPdfButton } from "@/components/reports/export-pdf-button";
 import { MetricCard } from "@/components/shared/metric-card";
 import { EmptyState } from "@/components/shared/empty-state";
 import { SeverityBadge } from "@/components/shared/severity-badge";
@@ -63,6 +64,13 @@ export default async function ReportsPage({
     params.end,
   );
 
+  const exportParams = new URLSearchParams({ type, preset: range.preset });
+  if (range.preset === "custom") {
+    exportParams.set("start", range.startKey);
+    exportParams.set("end", range.endKey);
+  }
+  const pdfHref = `/reports/export?${exportParams.toString()}`;
+
   return (
     <div className="flex flex-col gap-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -73,15 +81,31 @@ export default async function ReportsPage({
         Showing {range.label.toLowerCase()} ({formatDisplayDate(range.startKey)} – {formatDisplayDate(range.endKey)})
       </p>
 
-      {type === "attendance" ? <AttendanceReportSection startKey={range.startKey} endKey={range.endKey} /> : null}
-      {type === "missed" ? <MissedVisitReportSection startKey={range.startKey} endKey={range.endKey} /> : null}
-      {type === "high-risk" ? <HighRiskReportSection startKey={range.startKey} endKey={range.endKey} /> : null}
-      {type === "patients" ? <PatientSummaryReportSection startKey={range.startKey} endKey={range.endKey} /> : null}
+      {type === "attendance" ? (
+        <AttendanceReportSection startKey={range.startKey} endKey={range.endKey} pdfHref={pdfHref} />
+      ) : null}
+      {type === "missed" ? (
+        <MissedVisitReportSection startKey={range.startKey} endKey={range.endKey} pdfHref={pdfHref} />
+      ) : null}
+      {type === "high-risk" ? (
+        <HighRiskReportSection startKey={range.startKey} endKey={range.endKey} pdfHref={pdfHref} />
+      ) : null}
+      {type === "patients" ? (
+        <PatientSummaryReportSection startKey={range.startKey} endKey={range.endKey} pdfHref={pdfHref} />
+      ) : null}
     </div>
   );
 }
 
-async function AttendanceReportSection({ startKey, endKey }: { startKey: string; endKey: string }) {
+async function AttendanceReportSection({
+  startKey,
+  endKey,
+  pdfHref,
+}: {
+  startKey: string;
+  endKey: string;
+  pdfHref: string;
+}) {
   const report = await getAttendanceReport(startKey, endKey);
   const csvRows = report.trend.map((p) => ({
     period: p.label,
@@ -115,7 +139,10 @@ async function AttendanceReportSection({ startKey, endKey }: { startKey: string;
         <Card>
           <CardHeader className="flex-row items-center justify-between">
             <CardTitle>Attendance trend</CardTitle>
-            <ExportCsvButton filename="attendance-trend.csv" rows={csvRows} />
+            <div className="flex gap-2">
+              <ExportCsvButton filename="attendance-trend.csv" rows={csvRows} />
+              <ExportPdfButton href={pdfHref} />
+            </div>
           </CardHeader>
           <CardContent>
             <AttendanceTrendChart data={report.trend} />
@@ -134,7 +161,15 @@ async function AttendanceReportSection({ startKey, endKey }: { startKey: string;
   );
 }
 
-async function MissedVisitReportSection({ startKey, endKey }: { startKey: string; endKey: string }) {
+async function MissedVisitReportSection({
+  startKey,
+  endKey,
+  pdfHref,
+}: {
+  startKey: string;
+  endKey: string;
+  pdfHref: string;
+}) {
   const report = await getMissedVisitReport(startKey, endKey);
   const csvRows = report.rows.map((r) => ({
     patient: r.patient_full_name,
@@ -166,8 +201,9 @@ async function MissedVisitReportSection({ startKey, endKey }: { startKey: string
         <EmptyState icon={CalendarX2} title="No missed visits in this range" />
       ) : (
         <>
-          <div className="flex items-center justify-end">
+          <div className="flex items-center justify-end gap-2">
             <ExportCsvButton filename="missed-visits.csv" rows={csvRows} />
+            <ExportPdfButton href={pdfHref} />
           </div>
           <div className="overflow-x-auto rounded-xl border border-border bg-card">
             <Table>
@@ -206,7 +242,15 @@ async function MissedVisitReportSection({ startKey, endKey }: { startKey: string
   );
 }
 
-async function HighRiskReportSection({ startKey, endKey }: { startKey: string; endKey: string }) {
+async function HighRiskReportSection({
+  startKey,
+  endKey,
+  pdfHref,
+}: {
+  startKey: string;
+  endKey: string;
+  pdfHref: string;
+}) {
   const report = await getHighRiskReport(startKey, endKey);
   const csvRows = report.rows.map((r) => ({
     patient: r.patientFullName,
@@ -253,8 +297,9 @@ async function HighRiskReportSection({ startKey, endKey }: { startKey: string; e
         <EmptyState icon={AlertTriangle} title="No risk flags raised in this range" />
       ) : (
         <>
-          <div className="flex items-center justify-end">
+          <div className="flex items-center justify-end gap-2">
             <ExportCsvButton filename="high-risk-flags.csv" rows={csvRows} />
+            <ExportPdfButton href={pdfHref} />
           </div>
           <div className="overflow-x-auto rounded-xl border border-border bg-card">
             <Table>
@@ -291,7 +336,15 @@ async function HighRiskReportSection({ startKey, endKey }: { startKey: string; e
   );
 }
 
-async function PatientSummaryReportSection({ startKey, endKey }: { startKey: string; endKey: string }) {
+async function PatientSummaryReportSection({
+  startKey,
+  endKey,
+  pdfHref,
+}: {
+  startKey: string;
+  endKey: string;
+  pdfHref: string;
+}) {
   const report = await getPatientSummaryReport(startKey, endKey);
   const csvRows = report.rows.map((r) => ({
     patient: r.fullName,
@@ -335,8 +388,9 @@ async function PatientSummaryReportSection({ startKey, endKey }: { startKey: str
         <EmptyState icon={Users2} title="No patients registered in this range" />
       ) : (
         <>
-          <div className="flex items-center justify-end">
+          <div className="flex items-center justify-end gap-2">
             <ExportCsvButton filename="patient-summary.csv" rows={csvRows} />
+            <ExportPdfButton href={pdfHref} />
           </div>
           <div className="overflow-x-auto rounded-xl border border-border bg-card">
             <Table>
