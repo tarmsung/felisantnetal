@@ -26,6 +26,13 @@ export const clinicSettingsSchema = z.object({
   phone: optionalText(32),
   email: z.string().trim().email("Enter a valid email address.").optional().or(z.literal("")).transform((v) => (v ? v : undefined)),
   logo_url: optionalText(500),
+  // Digits only, no plus sign — see migration 0015's column comment.
+  // Used to normalize a patient's local-format phone number (e.g. a
+  // leading-zero Zimbabwean number) into a WhatsApp JID (Phase 5).
+  default_phone_country_code: z
+    .string()
+    .trim()
+    .regex(/^\d{1,4}$/, "Digits only, no plus sign (e.g. 263)."),
 });
 
 export type ClinicSettingsInput = z.infer<typeof clinicSettingsSchema>;
@@ -84,7 +91,11 @@ export const notificationSettingsSchema = z.object({
     .regex(/^\d+$/, "Enter a whole number of minutes.")
     .transform((v) => Number(v))
     .refine((v) => v >= 1 && v <= 1440, { message: "Enter between 1 and 1440 minutes (24 hours)." }),
-  whatsapp_provider: optionalText(100),
+  // Fixed set, not free text (Phase 5) — these are the only two
+  // NotificationProvider implementations that actually exist
+  // (lib/services/notifications/index.ts); a typo here would otherwise
+  // silently fall back to "console" and quietly never send anything.
+  whatsapp_provider: z.enum(["console", "baileys"]),
 });
 
 export type NotificationSettingsInput = z.infer<typeof notificationSettingsSchema>;

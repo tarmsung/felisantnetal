@@ -83,6 +83,19 @@ export async function sweepMissedAppointments(): Promise<number> {
     return 0;
   }
 
+  // Best-effort, separate from the update above: an appointment that
+  // already passed with no reminder ever sent no longer needs one
+  // (Phase 5). Deliberately scoped to reminder_status = 'pending' only —
+  // a reminder that already went out ('sent'/'delivered') or failed
+  // stays as-is, since that's real delivery history worth keeping, not
+  // something this sweep should silently overwrite.
+  await supabase
+    .from("appointments")
+    .update({ reminder_status: "not_applicable" })
+    .eq("status", "missed")
+    .eq("reminder_status", "pending")
+    .lt("scheduled_date", nowIso);
+
   for (const row of data ?? []) {
     await logAuditEvent({
       userId: null,
@@ -288,6 +301,15 @@ export async function rescheduleAppointment(
 
   if (updateError) throw new Error(`Failed to reschedule appointment: ${updateError.message}`);
 
+  // Best-effort — see sweepMissedAppointments' comment on why this is a
+  // separate, conditional update rather than folded into the one above.
+  // The new row created below gets its own fresh reminder_status='pending'.
+  await supabase
+    .from("appointments")
+    .update({ reminder_status: "not_applicable" })
+    .eq("id", appointmentId)
+    .eq("reminder_status", "pending");
+
   const { data: created, error: createError } = await supabase
     .from("appointments")
     .insert({
@@ -344,6 +366,14 @@ export async function cancelAppointment(
 
   if (error) throw new Error(`Failed to cancel appointment: ${error.message}`);
 
+  // Best-effort — see sweepMissedAppointments' comment on why this is a
+  // separate, conditional update.
+  await supabase
+    .from("appointments")
+    .update({ reminder_status: "not_applicable" })
+    .eq("id", appointmentId)
+    .eq("reminder_status", "pending");
+
   await logAuditEvent({
     userId: actingUserId,
     action: "appointment.cancel",
@@ -368,6 +398,14 @@ export async function completeAppointment(
 
   if (error) throw new Error(`Failed to complete appointment: ${error.message}`);
 
+  // Best-effort — see sweepMissedAppointments' comment on why this is a
+  // separate, conditional update.
+  await supabase
+    .from("appointments")
+    .update({ reminder_status: "not_applicable" })
+    .eq("id", appointmentId)
+    .eq("reminder_status", "pending");
+
   await logAuditEvent({
     userId: actingUserId,
     action: "appointment.complete",
@@ -389,6 +427,14 @@ export async function markAppointmentMissed(
     .eq("id", appointmentId);
 
   if (error) throw new Error(`Failed to mark appointment missed: ${error.message}`);
+
+  // Best-effort — see sweepMissedAppointments' comment on why this is a
+  // separate, conditional update.
+  await supabase
+    .from("appointments")
+    .update({ reminder_status: "not_applicable" })
+    .eq("id", appointmentId)
+    .eq("reminder_status", "pending");
 
   await logAuditEvent({
     userId: actingUserId,

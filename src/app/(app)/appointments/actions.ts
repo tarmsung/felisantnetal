@@ -11,6 +11,7 @@ import {
   addAppointmentNote,
   getUsedVisitNumbers,
 } from "@/lib/services/appointmentService";
+import { sendReminderForAppointment } from "@/lib/services/notificationService";
 import { clinicLocalDateTimeToIso } from "@/lib/dates";
 import { searchPatients, getLatestPregnancy } from "@/lib/services/patientService";
 import { suggestNextVisit, type NextVisitSuggestion } from "@/lib/services/ancService";
@@ -143,6 +144,28 @@ export async function markAppointmentMissedAction(
     await markAppointmentMissed(appointmentId, user.id);
   } catch (err) {
     return { status: "error", message: err instanceof Error ? err.message : "Failed to update." };
+  }
+  revalidateAppointmentSurfaces(patientId);
+  return { status: "success" };
+}
+
+/**
+ * Manual trigger (ARCHITECTURE.md's "Notifications" section: "any
+ * 'send reminder now' button will call the facade") — any active staff
+ * member, not just an administrator, per reminders_insert's RLS policy
+ * (migration 0009). Uses the ordinary RLS-scoped client (a real staff
+ * member is acting here), unlike the cron sweep which must use the
+ * service-role client — see sendReminderForAppointment's own comment.
+ */
+export async function sendReminderNowAction(
+  appointmentId: string,
+  patientId: string,
+): Promise<ActionResult> {
+  const user = await requireUser();
+  const supabase = await createSupabaseServerClient();
+  const result = await sendReminderForAppointment(supabase, appointmentId, user.id);
+  if (!result.success) {
+    return { status: "error", message: result.error ?? "Failed to send reminder." };
   }
   revalidateAppointmentSurfaces(patientId);
   return { status: "success" };

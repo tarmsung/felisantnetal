@@ -5,6 +5,13 @@
 #
 # Usage: copy .env.example to .env.local, fill it in, then:
 #   docker compose up --build
+#
+# whatsapp-service (Phase 5): read whatsapp-service/README.md — in
+# particular its ban-risk disclosure — before pairing a real clinic
+# WhatsApp number to it. Not started at all unless
+# notification_settings.whatsapp_provider is switched to "baileys" in
+# Settings; the app works fine without it (console provider / no
+# reminders sent).
 
 services:
   app:
@@ -20,3 +27,19 @@ services:
     ports:
       - "3000:3000"
     restart: unless-stopped
+
+  whatsapp-service:
+    build:
+      context: ./whatsapp-service
+    environment:
+      API_KEY: ${WHATSAPP_SERVICE_API_KEY}
+    volumes:
+      # Session credentials (see whatsapp-service/src/baileys.ts) —
+      # named volume so re-pairing isn't needed on every restart.
+      - whatsapp-auth:/app/auth_info
+    ports:
+      - "3100:3100"
+    restart: unless-stopped
+
+volumes:
+  whatsapp-auth:

@@ -10,6 +10,11 @@ import {
   updateNotificationSettings,
 } from "@/lib/services/notificationService";
 import {
+  getWhatsAppConnectionStatus,
+  logoutWhatsAppConnection,
+  type WhatsAppConnectionStatus,
+} from "@/lib/services/notifications/whatsappStatus";
+import {
   clinicSettingsSchema,
   ancScheduleTemplateSchema,
   clinicalRuleSchema,
@@ -128,6 +133,22 @@ export async function updateNotificationTemplateAction(
   }
 
   revalidateSettings();
+  return { status: "success" };
+}
+
+/** Backs the Notifications tab's connection card — see whatsappStatus.ts. Any admin, no mutation, so no revalidation needed. */
+export async function getWhatsAppConnectionStatusAction(): Promise<WhatsAppConnectionStatus> {
+  await requireAdmin();
+  return getWhatsAppConnectionStatus();
+}
+
+/** "Log out / re-pair" — ends the whatsapp-service's session so a different number can be paired. */
+export async function logoutWhatsAppConnectionAction(): Promise<ActionResult> {
+  await requireAdmin();
+  const result = await logoutWhatsAppConnection();
+  if (!result.success) {
+    return { status: "error", message: result.error ?? "Failed to log out." };
+  }
   return { status: "success" };
 }
 

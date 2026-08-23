@@ -23,6 +23,7 @@ export interface UpdateClinicSettingsInput {
   phone?: string;
   email?: string;
   logo_url?: string;
+  default_phone_country_code: string;
 }
 
 export async function updateClinicSettings(
@@ -40,6 +41,7 @@ export async function updateClinicSettings(
       phone: input.phone ?? null,
       email: input.email ?? null,
       logo_url: input.logo_url ?? null,
+      default_phone_country_code: input.default_phone_country_code,
       updated_by: actingAdminId,
     })
     .eq("id", true);

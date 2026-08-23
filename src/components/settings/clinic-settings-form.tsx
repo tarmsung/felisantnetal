@@ -17,6 +17,7 @@ export function ClinicSettingsForm({ settings }: { settings: ClinicSettingsRow |
   const [phone, setPhone] = useState(settings?.phone ?? "");
   const [email, setEmail] = useState(settings?.email ?? "");
   const [logoUrl, setLogoUrl] = useState(settings?.logo_url ?? "");
+  const [countryCode, setCountryCode] = useState(settings?.default_phone_country_code ?? "263");
 
   function submit() {
     setError(undefined);
@@ -27,6 +28,7 @@ export function ClinicSettingsForm({ settings }: { settings: ClinicSettingsRow |
         phone,
         email,
         logo_url: logoUrl,
+        default_phone_country_code: countryCode,
       });
       if (result.status === "error") {
         setError(result.message);
@@ -66,6 +68,19 @@ export function ClinicSettingsForm({ settings }: { settings: ClinicSettingsRow |
             <Label htmlFor="settings-logo">Logo URL</Label>
             <Input id="settings-logo" value={logoUrl} onChange={(e) => setLogoUrl(e.target.value)} placeholder="/brand/felis-logo.png" />
           </div>
+        </div>
+        <div className="grid gap-2 sm:max-w-[200px]">
+          <Label htmlFor="settings-country-code">Phone country code</Label>
+          <Input
+            id="settings-country-code"
+            value={countryCode}
+            onChange={(e) => setCountryCode(e.target.value)}
+            placeholder="263"
+          />
+          <p className="text-xs text-muted-foreground">
+            Digits only, no plus sign. Used to turn a patient&apos;s local-format phone number into
+            a WhatsApp-reachable one when sending reminders (Phase 5).
+          </p>
         </div>
         {error ? (
           <p role="alert" className="text-sm text-destructive">

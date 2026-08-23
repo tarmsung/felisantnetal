@@ -21,12 +21,12 @@ one starts.
 | 2 | Patient management: registration, search, profile | **Done** |
 | 3 | ANC scheduling: engine, calendar, rescheduling, missed visits | **Done** |
 | 4 | Clinical records: visit recording, validation, risk flag engine | **Done** |
-| 5 | WhatsApp reminders: notification service, scheduler, delivery logs | **Deferred** — skipped ahead to Phase 6 at the project owner's request; nothing in Phase 6 depends on it |
+| 5 | WhatsApp reminders: notification service, scheduler, delivery logs | **Done** (this checkpoint) — built last, out of order (see below) |
 | 6 | Dashboard and reports: metrics, charts, filters | **Done** |
 | 7 | PDF generation: patient card, report exports | **Done** |
 | 8 | Administration: users, settings, clinical rule config, audit log viewer | **Done** |
 | 9 | Security & optimization pass | **Done** |
-| 10 | Testing & deployment | **Done** (this checkpoint) — Phase 5 remains the only deferred phase |
+| 10 | Testing & deployment | **Done** |
 
 The sidebar/navigation (`src/lib/navigation.ts`) already lists every
 module from the final IA, each tagged with the phase that implements it.
@@ -801,28 +801,106 @@ Dockerfile's `HEALTHCHECK` now points at it.
 **Database indexes**: none added this phase — Phase 9's pass already
 covered the query-pattern gap left by migration 0008.
 
-## Notifications (WhatsApp, and later SMS/email)
+## Phase 5: WhatsApp reminders
 
-The *sending* half isn't built yet (Phase 5), but the shape is decided
-so schema and UI don't have to change when it lands, and the
-*configuration* half — template text and delivery timing — was built
-early, in Phase 8's Settings module, since an administrator being able
-to see and edit those doesn't depend on anything actually being sent:
-`notificationService.ts` already exposes
-`listNotificationTemplates`/`updateNotificationTemplate` and
-`getNotificationSettings`/`updateNotificationSettings` (rendered by
-`components/settings/notification-settings-section.tsx`). What Phase 5
-adds on top is a thin facade over a `NotificationProvider` interface
-(`send(to, body) -> {success, providerMessageId?, error?}`), selected
-at runtime by the `whatsapp_provider` setting (already a configurable
-field, currently unused). The reminder scheduler and any "send
-reminder now" button will call the facade, never a specific provider's
-SDK — swapping providers later is a new file implementing the interface
-plus one setting change, not an application-wide rewrite. Message
-templates render with `{{token}}` substitution; the rendered text
-intentionally excludes diagnosis, measurements and risk detail (section
-9) by construction — the template can't reference fields the renderer
-doesn't pass it.
+Built last, out of original order — deliberately deferred past Phase 6
+at the project owner's request, then picked back up once Phases 6-10
+were done. The *configuration* half (template text, delivery timing)
+was built early, in Phase 8's Settings module, since an administrator
+being able to see and edit those doesn't depend on anything actually
+being sent. This phase adds the actual sending path.
+
+**⚠️ Read before pairing a real clinic phone number**: the sending
+mechanism is [`@whiskeysockets/baileys`](https://github.com/WhiskeySockets/Baileys),
+an unofficial, reverse-engineered WhatsApp Web client — not the
+sanctioned WhatsApp Business API. Baileys' own README puts the
+responsibility for fair use on whoever operates it and warns against
+spam/bulk automated messaging, which is close to what a reminder system
+does even at a small clinic's volume. There is a real, inherent risk
+that WhatsApp/Meta could ban the connected number, with no official
+appeal path — this is a property of the approach, not something this
+implementation can engineer away. `whatsapp-service/README.md` carries
+the full disclosure; anyone enabling the "baileys" provider in Settings
+should read it first. An initial idea to use the `nizarfadlan/baileys-api`
+wrapper project was dropped after checking it directly: it's archived
+(no maintenance since March 2025), its own README calls it "learning
+purposes only," and it requires an entirely separate Prisma-backed
+database just for session storage. Baileys itself (the core library) is
+actively maintained (MIT, WhiskeySockets org, 10k+ stars) — building a
+small dedicated service on it directly avoids the archived wrapper's
+baggage while keeping the same "separate persistent service" shape.
+
+**Why a separate service, not code inside this Next.js app.** A
+WhatsApp connection is a long-lived, stateful WebSocket with on-disk
+session credentials (via Baileys' own `useMultiFileAuthState` — the
+officially-documented, best-tested persistence mechanism; a custom
+database-backed auth-state store was considered and rejected as a
+known source of subtle session-corruption bugs if the signal-key
+storage isn't implemented exactly right). That doesn't fit a
+request-scoped Next.js deployment. `whatsapp-service/` is a small
+standalone Express app (see its own README for the full API) that owns
+that connection and exposes `/status` (connection state + pairing QR,
+as a data-URL PNG) and `/send` over a shared-secret-protected REST API.
+The main app never touches Baileys directly.
+
+**The facade.** `lib/services/notifications/` is the
+`NotificationProvider` interface (`send(to, body) ->
+{success, providerMessageId?, error?}`) ARCHITECTURE.md had already
+committed to before this phase existed, plus two implementations:
+`consoleProvider` (logs instead of sending — the default, and how the
+reminder scheduler and "send now" button are fully exercisable with no
+paired WhatsApp session at all) and `baileysProvider` (a thin HTTP
+client for whatsapp-service). Selected at runtime by
+`notification_settings.whatsapp_provider` — administrator-configurable
+in Settings, not an env var, so switching providers doesn't need a
+redeploy. Swapping to the official WhatsApp Business API later, if this
+clinic ever has budget for it, is a new file implementing the same
+interface plus one Settings change — this facade was built specifically
+so that migration never touches anything upstream of the provider.
+
+**Phone number normalization** (`lib/services/notifications/phone.ts`):
+`patients.phone` is free text (any format a nurse is handed), but a
+WhatsApp JID needs `<countrycode><number>@s.whatsapp.net`. Which
+country's local-number format to assume is a real business assumption,
+so it's `clinic_settings.default_phone_country_code` (migration 0015,
+defaulting to `263` for Zimbabwe, admin-editable in Settings → Clinic
+Details) rather than hardcoded — the same "never invent, make it
+configurable" principle the clinical-rules engine follows.
+
+**The reminder sweep** (`notificationService.sendReminderForAppointment`/
+`runReminderSweep`) is the real scheduled job spec section 27 asks for —
+see the "interim stand-in... since cron infrastructure this phase
+doesn't build yet" comment on `appointmentService.sweepMissedAppointments`,
+written back in Phase 3 specifically anticipating this. Exposed at
+`POST /api/cron/reminders`, guarded by `CRON_SECRET` (this app has no
+built-in scheduler — trigger it from system cron, a hosting platform's
+scheduled trigger, etc.). Two passes: appointments newly due within
+`reminder_hours_before`, then previously-failed ones eligible for a
+retry (under `retry_max_attempts`, past `retry_backoff_minutes` since
+the last attempt). `sendReminderForAppointment` is shared with the
+manual "Send reminder now" button on `AppointmentDetailSheet` — the
+same function, called with two differently-privileged Supabase clients:
+the manual path uses the ordinary RLS-scoped client (a real staff
+member is acting, and `reminders_insert`'s RLS policy already allows
+any active staff member to do this), while the cron path uses the
+service-role client, since a cron trigger has no staff session at all —
+migration 0009's own RLS policy comment says as much ("The cron job
+writes as service_role, which bypasses RLS entirely"). Every attempt,
+successful or not, is recorded in `reminders` (one row per attempt,
+consistent with that table's `recipient` column already being
+documented as "a snapshot... not a live FK") and mirrored onto a
+summary field, `appointments.reminder_status`, kept in sync by every
+appointment-lifecycle function (cancel/complete/mark-missed/reschedule
+now flip it to `not_applicable` when an appointment can no longer
+receive one — added this phase, a small correctness gap left over from
+when those columns existed but nothing read or wrote them).
+
+Message templates render with `{{token}}` substitution
+(`lib/services/notifications/template.ts`) — deliberately plain string
+replacement, not a templating engine: a template can only ever contain
+the exact tokens the caller explicitly renders (`patient_name`,
+`appointment_date`), which is what keeps diagnosis, measurements, and
+risk detail out of a WhatsApp message by construction, not convention.
 
 ## Testing
 

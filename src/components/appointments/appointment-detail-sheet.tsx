@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
-import { CalendarClock, CheckCircle2, Phone, Stethoscope, StickyNote, XCircle } from "lucide-react";
+import { CalendarClock, CheckCircle2, MessageCircle, Phone, Stethoscope, StickyNote, XCircle } from "lucide-react";
 import {
   Sheet,
   SheetContent,
@@ -23,6 +23,7 @@ import { RecordVisitForm } from "@/components/visits/record-visit-dialog";
 import {
   completeAppointmentAction,
   markAppointmentMissedAction,
+  sendReminderNowAction,
 } from "@/app/(app)/appointments/actions";
 import { formatClinicDateTime } from "@/lib/dates";
 import type { AppointmentListRow } from "@/lib/services/appointmentService";
@@ -73,6 +74,19 @@ export function AppointmentDetailSheet({
         return;
       }
       toast.success("Marked missed.");
+      onChanged?.();
+    });
+  }
+
+  function handleSendReminder() {
+    if (!appointment) return;
+    startTransition(async () => {
+      const result = await sendReminderNowAction(appointment.id, appointment.patient_id);
+      if (result.status === "error") {
+        toast.error(result.message ?? "Failed to send reminder.");
+        return;
+      }
+      toast.success("Reminder sent.");
       onChanged?.();
     });
   }
@@ -166,6 +180,12 @@ export function AppointmentDetailSheet({
                   Cancel appointment
                 </Button>
               </>
+            ) : null}
+            {appointment.status === "scheduled" && appointment.patient_phone ? (
+              <Button variant="outline" onClick={handleSendReminder} disabled={pending}>
+                <MessageCircle className="h-4 w-4" />
+                Send reminder now
+              </Button>
             ) : null}
             {appointment.patient_phone ? (
               <Button

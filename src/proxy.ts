@@ -146,9 +146,12 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    // api/health added in Phase 10: an orchestrator's liveness probe has
-    // no session cookie and shouldn't be redirected to /login, or pay
-    // for a session-refresh round trip on every check.
-    "/((?!_next/static|_next/image|favicon.ico|brand/|api/health|.*\\.(?:svg|png|jpg|jpeg|webp)$).*)",
+    // api/health (Phase 10): an orchestrator's liveness probe has no
+    // session cookie and shouldn't be redirected to /login, or pay for
+    // a session-refresh round trip on every check.
+    // api/cron/reminders (Phase 5): an external scheduler trigger has
+    // no session cookie either — it authenticates itself with
+    // CRON_SECRET (see that route's own comment), not a staff login.
+    "/((?!_next/static|_next/image|favicon.ico|brand/|api/health|api/cron/|.*\\.(?:svg|png|jpg|jpeg|webp)$).*)",
   ],
 };

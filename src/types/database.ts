@@ -229,6 +229,7 @@ export type ClinicSettingsRow = {
   phone: string | null;
   email: string | null;
   logo_url: string | null;
+  default_phone_country_code: string;
   updated_by: string | null;
   updated_at: string;
 };

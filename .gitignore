@@ -45,3 +45,10 @@ next-env.d.ts
 /playwright-report
 /test-results
 /blob-report
+
+# whatsapp-service (Phase 5) — a separate Node project, not covered by
+# the root-anchored ignores above. auth_info holds live WhatsApp session
+# credentials — never commit it, same reasoning as .env* above.
+whatsapp-service/node_modules
+whatsapp-service/dist
+whatsapp-service/auth_info

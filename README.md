@@ -62,9 +62,9 @@ cp .env.example .env.local
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Same page | Safe for the browser — RLS is the real gate |
 | `SUPABASE_SERVICE_ROLE_KEY` | Same page | **Server-only.** Never prefix with `NEXT_PUBLIC_`, never commit it |
 | `DATABASE_URL` | Same page → Database | Only needed for direct SQL tooling |
-| `WHATSAPP_PROVIDER`, `WHATSAPP_API_URL`, `WHATSAPP_API_KEY` | Your WhatsApp provider | Not used until Phase 5 |
+| `WHATSAPP_SERVICE_URL`, `WHATSAPP_SERVICE_API_KEY` | You choose (see "WhatsApp integration" below) | Only read by the `baileys` provider; leave unset to stay on the `console` provider |
 | `NEXT_PUBLIC_APP_URL` | — | e.g. `http://localhost:3000` |
-| `CRON_SECRET` | Generate one (`openssl rand -hex 32`) | Protects the reminder cron endpoint, added in Phase 5 |
+| `CRON_SECRET` | Generate one (`openssl rand -hex 32`) | Protects the reminder cron endpoint (Phase 5) |
 | `SEED_ADMIN_NAME/EMAIL/PASSWORD` | You choose | Only read by `scripts/seed.ts` |
 | `E2E_ADMIN_EMAIL/PASSWORD`, `E2E_NURSE_EMAIL/PASSWORD` | Disposable staff accounts you create | Only read by `npm run test:e2e` (Phase 10) — never point these at a real clinic login |
 
@@ -185,12 +185,16 @@ self-contained `.next/standalone` directory (used by the Dockerfile).
 docker compose up --build
 ```
 
-`docker-compose.yml` runs only the app container — the database is the
-hosted Supabase project, not a local container. `Dockerfile` is a
-multi-stage build; `NEXT_PUBLIC_*` values are passed as build args (see
-the compose file), while server-only secrets (`SUPABASE_SERVICE_ROLE_KEY`,
+`docker-compose.yml` runs the app container and, since Phase 5, a
+`whatsapp-service` container alongside it (a named volume,
+`whatsapp-auth`, persists its paired WhatsApp session across restarts)
+— the database is the hosted Supabase project, not a local container
+for either service. `Dockerfile` is a multi-stage build; `NEXT_PUBLIC_*`
+values are passed as build args (see the compose file), while
+server-only secrets (`SUPABASE_SERVICE_ROLE_KEY`, `WHATSAPP_SERVICE_API_KEY`,
 etc.) are supplied at runtime via `.env.local` / your platform's secret
-store — never baked into the image.
+store — never baked into the image. See `whatsapp-service/README.md`
+before pairing a real clinic phone number to it.
 
 **Without Docker:** any Node 22+ host works — `npm run build && npm run
 start`, with the same environment variables set.
@@ -216,11 +220,36 @@ before a release.
 
 ## 12. WhatsApp integration
 
-Not implemented yet (Phase 5). The architecture is decided in
-[`ARCHITECTURE.md`](ARCHITECTURE.md#notifications-whatsapp-and-later-smsemail):
-a `NotificationService` facade over a swappable provider interface,
-selected by `WHATSAPP_PROVIDER`, so switching WhatsApp providers (or
-adding SMS/email) later doesn't require an application-wide rewrite.
+Built in Phase 5 — see [`ARCHITECTURE.md`](ARCHITECTURE.md#phase-5-whatsapp-reminders)
+for the full design and, importantly, a ban-risk disclosure worth
+reading before enabling it for real. Short version:
+
+- **Read `whatsapp-service/README.md` before pairing a real clinic
+  phone number.** It uses an unofficial WhatsApp client
+  ([Baileys](https://github.com/WhiskeySockets/Baileys)), not the
+  sanctioned WhatsApp Business API — there is a real, inherent risk of
+  the connected number being banned, with no official appeal path.
+- The default provider is `console` (logs instead of sending) — nothing
+  is sent until an administrator switches Settings → Notifications →
+  WhatsApp provider to "WhatsApp (Baileys)".
+- Switching it on starts a separate process, `whatsapp-service/` (its
+  own README covers running it standalone or via this repo's
+  `docker-compose.yml`), and requires `WHATSAPP_SERVICE_URL` /
+  `WHATSAPP_SERVICE_API_KEY` set in `.env.local` (see the environment
+  variables table above).
+- Pairing is a one-time QR-code scan from the Settings page, once the
+  service is running and reachable — the page shows a live connection
+  status and the QR itself while unpaired.
+- The reminder sweep runs at `POST /api/cron/reminders`, guarded by
+  `CRON_SECRET` — this app has no built-in scheduler, so it needs an
+  external trigger (system cron, your hosting platform's scheduled
+  jobs, etc.) hitting that endpoint on a schedule. A nurse/administrator
+  can also send an individual reminder immediately from an
+  appointment's detail view ("Send reminder now").
+- `NotificationProvider` (`lib/services/notifications/`) is a swappable
+  interface, not tied to WhatsApp specifically — adding SMS/email or
+  swapping to the official Business API later is a new provider file
+  plus one Settings change, not an application-wide rewrite.
 
 ## 13. Backup recommendations
 

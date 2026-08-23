@@ -1,0 +1,26 @@
+{
+  "name": "felis-clinic-whatsapp-service",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Small standalone REST wrapper around @whiskeysockets/baileys for the Felis Clinic ANC app's WhatsApp reminders (Phase 5). See README.md before deploying this against a real clinic WhatsApp number.",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js"
+  },
+  "dependencies": {
+    "@hapi/boom": "^10.0.1",
+    "@whiskeysockets/baileys": "^7.0.0-rc14",
+    "express": "^5.1.0",
+    "pino": "^9.6.0",
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.1",
+    "@types/node": "^22.13.5",
+    "@types/qrcode": "^1.5.5",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2"
+  }
+}
