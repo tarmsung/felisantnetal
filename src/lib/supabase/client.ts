@@ -2,6 +2,7 @@
 
 import { createBrowserClient } from "@supabase/ssr";
 import type { Database } from "@/types/database";
+import { supabaseCookieOptions } from "./cookieOptions";
 
 /**
  * Browser-side Supabase client. Uses the anon key only — every read/write
@@ -18,7 +19,7 @@ export function createSupabaseBrowserClient() {
     {
       // Matches src/lib/supabase/server.ts and proxy.ts — same cookie,
       // three write sites, one options object between them.
-      cookieOptions: { secure: process.env.NODE_ENV === "production" },
+      cookieOptions: supabaseCookieOptions,
     },
   );
 }

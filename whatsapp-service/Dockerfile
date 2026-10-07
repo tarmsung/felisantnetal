@@ -1,8 +1,8 @@
 # Small standalone service — see README.md before deploying this.
 FROM node:22-alpine AS deps
 WORKDIR /app
-COPY package.json package-lock.json* ./
-RUN npm install --omit=dev=false
+COPY package.json package-lock.json ./
+RUN npm ci
 
 FROM node:22-alpine AS builder
 WORKDIR /app
@@ -16,8 +16,8 @@ ENV NODE_ENV=production
 RUN addgroup --system --gid 1001 whatsapp \
   && adduser --system --uid 1001 whatsapp
 
-COPY package.json package-lock.json* ./
-RUN npm install --omit=dev
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
 COPY --from=builder /app/dist ./dist
 
 # Session credentials live here (see src/baileys.ts's AUTH_DIR) — a

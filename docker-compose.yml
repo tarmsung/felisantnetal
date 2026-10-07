@@ -1,45 +1,75 @@
 # The database is a hosted Supabase project — there is intentionally no
-# Postgres service here. This compose file exists so the app can be run
-# as a container consistently in any environment (spec section 37), with
-# all secrets supplied at deploy time via env_file, never baked in.
+# Postgres service here. This compose file runs everything else, on a
+# VPS or any Docker host, with secrets supplied at deploy time, never
+# baked into an image.
 #
-# Usage: copy .env.example to .env.local, fill it in, then:
-#   docker compose up --build
+# Usage (see README "Deploying to a VPS" for the full walkthrough):
+#   1. cp .env.example .env.local   and fill it in
+#   2. docker compose --env-file .env.local up -d --build
+#
+# --env-file matters: compose reads ".env" by default, NOT ".env.local",
+# so without it the ${...} values below come out empty.
+#
+# Only Caddy publishes ports. The app and whatsapp-service are reachable
+# solely over the internal compose network — whatsapp-service in
+# particular can send WhatsApp messages as the clinic and should never
+# be exposed directly (its API key is a second line of defense, not the
+# first).
 #
 # whatsapp-service (Phase 5): read whatsapp-service/README.md — in
 # particular its ban-risk disclosure — before pairing a real clinic
-# WhatsApp number to it. Not started at all unless
-# notification_settings.whatsapp_provider is switched to "baileys" in
-# Settings; the app works fine without it (console provider / no
-# reminders sent).
+# WhatsApp number to it.
 
 services:
+  caddy:
+    image: caddy:2-alpine
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Issued certificates + ACME account — persisted so a restart
+      # doesn't re-request them (Let's Encrypt rate-limits that).
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - app
+    restart: unless-stopped
+
   app:
     build:
       context: .
       dockerfile: Dockerfile
       args:
-        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
-        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
-        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:?set in .env.local}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY:?set in .env.local}
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:?set in .env.local}
     env_file:
       - .env.local
-    ports:
-      - "3000:3000"
+    environment:
+      # Overrides .env.local's http://localhost:3100 — inside this
+      # container "localhost" is the app itself, not the other service.
+      WHATSAPP_SERVICE_URL: http://whatsapp-service:3100
+    expose:
+      - "3000"
     restart: unless-stopped
 
   whatsapp-service:
     build:
       context: ./whatsapp-service
     environment:
-      API_KEY: ${WHATSAPP_SERVICE_API_KEY}
+      API_KEY: ${WHATSAPP_SERVICE_API_KEY:?set in .env.local}
     volumes:
       # Session credentials (see whatsapp-service/src/baileys.ts) —
       # named volume so re-pairing isn't needed on every restart.
       - whatsapp-auth:/app/auth_info
-    ports:
-      - "3100:3100"
+    expose:
+      - "3100"
     restart: unless-stopped
 
 volumes:
   whatsapp-auth:
+  caddy-data:
+  caddy-config:

@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { supabaseCookieOptions } from "@/lib/supabase/cookieOptions";
 
 const PUBLIC_PATHS = ["/login", "/auth/callback"];
 
@@ -101,9 +102,8 @@ export async function proxy(request: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       // Same cookieOptions as src/lib/supabase/server.ts and client.ts —
-      // see the comment there for why `secure` is set and `httpOnly`
-      // deliberately isn't.
-      cookieOptions: { secure: process.env.NODE_ENV === "production" },
+      // see cookieOptions.ts.
+      cookieOptions: supabaseCookieOptions,
       cookies: {
         getAll() {
           return request.cookies.getAll();

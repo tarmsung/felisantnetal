@@ -179,17 +179,22 @@ self-contained `.next/standalone` directory (used by the Dockerfile).
 
 ## 10. Deployment
 
-**Docker:**
+**Docker** (the recommended way on a server — see "Deploying to a VPS"
+below for the full walkthrough):
 
 ```bash
-docker compose up --build
+docker compose --env-file .env.local up -d --build
 ```
 
-`docker-compose.yml` runs the app container and, since Phase 5, a
-`whatsapp-service` container alongside it (a named volume,
-`whatsapp-auth`, persists its paired WhatsApp session across restarts)
-— the database is the hosted Supabase project, not a local container
-for either service. `Dockerfile` is a multi-stage build; `NEXT_PUBLIC_*`
+(`--env-file .env.local` is required: compose reads `.env` by default,
+not `.env.local`.)
+
+`docker-compose.yml` runs a Caddy reverse proxy (the only thing that
+publishes ports), the app, and, since Phase 5, a `whatsapp-service`
+container (a named volume, `whatsapp-auth`, persists its paired
+WhatsApp session across restarts) — the database is the hosted Supabase
+project, not a local container for any of them. `Dockerfile` is a
+multi-stage build; `NEXT_PUBLIC_*`
 values are passed as build args (see the compose file), while
 server-only secrets (`SUPABASE_SERVICE_ROLE_KEY`, `WHATSAPP_SERVICE_API_KEY`,
 etc.) are supplied at runtime via `.env.local` / your platform's secret
@@ -230,6 +235,65 @@ already points at it; wire the same URL into whatever load
 balancer/orchestrator you deploy behind. It's excluded from
 `proxy.ts`'s auth redirect (a liveness probe has no session cookie) and
 returns `503` rather than a redirect if Supabase is unreachable.
+
+### Deploying to a VPS
+
+Assumes a Linux VPS (Ubuntu 22.04/24.04 or similar). `next build` is
+memory-hungry — 2 GB RAM is comfortable; on 1 GB add a swap file or the
+build can be killed partway.
+
+1. **Firewall**: allow only SSH, HTTP and HTTPS (`ufw allow OpenSSH &&
+   ufw allow 80,443/tcp && ufw enable`). Nothing else needs to be
+   reachable — the app and whatsapp-service aren't published at all,
+   only Caddy is.
+2. **Install Docker** (Docker's official convenience script or your
+   distro's `docker.io` + `docker-compose-plugin`).
+3. **Get the code**: `git clone https://github.com/tarmsung/felisantnetal.git`
+   then `cd felisantnetal`.
+4. **Create `.env.local`** on the server (`cp .env.example .env.local`)
+   and fill it in. Secrets (the Supabase service-role key,
+   `WHATSAPP_SERVICE_API_KEY`, `CRON_SECRET`) should travel to the
+   server over a secure channel — never through git. Two values are
+   specific to this deployment and must be right **before the first
+   build** (they're baked into the image): `NEXT_PUBLIC_APP_URL` (the
+   address people will type into a browser) and `SITE_ADDRESS` (what
+   Caddy serves — see below). `WHATSAPP_SERVICE_URL` is ignored here;
+   compose points the app at the right container itself.
+5. **Start it**: `docker compose --env-file .env.local up -d --build`,
+   then `docker compose ps` (everything `running`/`healthy`) and open
+   your `NEXT_PUBLIC_APP_URL`.
+6. **Schedule the reminder sweep** — nothing triggers
+   `/api/cron/reminders` on its own. Add to the server's crontab
+   (`crontab -e`), run from the repo directory:
+
+   ```cron
+   */15 * * * * cd /path/to/felisantnetal && docker compose --env-file .env.local exec -T app node -e "fetch('http://localhost:3000/api/cron/reminders',{method:'POST',headers:{Authorization:'Bearer '+process.env.CRON_SECRET}}).then(r=>r.text()).then(console.log)" >> /var/log/felis-cron.log 2>&1
+   ```
+
+   Check `/var/log/felis-cron.log` after 15 minutes — it should show
+   `{"sent":0,"failed":0,"skipped":0}` (or real counts).
+7. **WhatsApp**: Settings → Notifications on the new server shows a
+   fresh pairing QR; scan it. **Stop the old instance first** (e.g.
+   `pm2 stop whatsapp-service` on the PC) — one WhatsApp session can't
+   be held by two processes at once; they'll keep knocking each other
+   offline. Re-pairing is simpler and safer than copying the old
+   `auth_info` across.
+8. **Updating later**: `git pull && docker compose --env-file .env.local
+   up -d --build`.
+
+**With no domain yet.** HTTPS needs a *hostname*, not just an IP, so
+the real question is what to point at the server:
+
+| Option | What you get | Cost/effort |
+|---|---|---|
+| **Free hostname + Caddy** (recommended) — e.g. a free [DuckDNS](https://www.duckdns.org) subdomain like `felis.duckdns.org` pointed at the server's IP. Set `SITE_ADDRESS=felis.duckdns.org` and `NEXT_PUBLIC_APP_URL=https://felis.duckdns.org`. | Real HTTPS (Caddy gets and renews the certificate itself — ports 80/443 must be open), working login cookies, working "copy password" buttons. | A few minutes, free. When you buy a real domain, change those two values and rebuild — nothing else. |
+| **Plain HTTP on the IP** — `SITE_ADDRESS=:80`, `NEXT_PUBLIC_APP_URL=http://<server-ip>`. | Works for trying the deployment out. | None — but **passwords and patient records cross the network unencrypted**; anyone on the path (shared Wi-Fi, an ISP) can read them. Don't enter real patient data this way. "Copy password" buttons also won't work (browsers only allow clipboard access on HTTPS). |
+| **Tailscale** — put the server and staff devices on a private network; the app is never on the public internet at all. | Encrypted, and not publicly reachable. | Every staff device needs the Tailscale app. |
+
+The login cookie is only marked `Secure` when `NEXT_PUBLIC_APP_URL`
+starts with `https://` (`src/lib/supabase/cookieOptions.ts`) — a
+browser silently drops a Secure cookie from a plain-HTTP site, which
+would make sign-in bounce straight back to the login page.
 
 ## 11. Continuous integration
 

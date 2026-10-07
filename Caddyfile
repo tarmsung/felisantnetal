@@ -1,0 +1,17 @@
+# Reverse proxy in front of the app (see docker-compose.yml).
+#
+# SITE_ADDRESS (from .env.local) decides everything:
+#   ":80"                       plain HTTP on whatever IP the server has —
+#                               the no-domain fallback. NOT safe for real
+#                               patient data; see README "Deploying to a VPS".
+#   "felis.duckdns.org" (any    Caddy obtains and renews a Let's Encrypt
+#    hostname pointing at       certificate automatically and redirects
+#    this server)               HTTP -> HTTPS. No other change needed.
+#
+# NEXT_PUBLIC_APP_URL must use the matching scheme (it's baked in at
+# image build time) — that's what decides whether the session cookie is
+# marked Secure; see src/lib/supabase/cookieOptions.ts.
+{$SITE_ADDRESS} {
+	encode gzip
+	reverse_proxy app:3000
+}

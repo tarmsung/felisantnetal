@@ -693,10 +693,19 @@ Content-Security-Policy, which needs a fresh value per request):
     attributes. `script-src` is still the strict, nonced,
     `'strict-dynamic'` directive — that's the one that actually stops
     injected-script XSS, which is the CSP's main point.
-- **Supabase session cookie**: `cookieOptions: { secure: NODE_ENV ===
-  "production" }` added to all three client-construction sites
-  (`lib/supabase/server.ts`, `client.ts`, `proxy.ts`) — `@supabase/ssr`'s
-  own default omits `secure` entirely. `httpOnly` is deliberately left
+- **Supabase session cookie**: `lib/supabase/cookieOptions.ts`, shared
+  by all three client-construction sites (`server.ts`, `client.ts`,
+  `proxy.ts`) — `@supabase/ssr`'s own default omits `secure` entirely.
+  *Revised when preparing the VPS deployment:* this originally keyed
+  `secure` off `NODE_ENV === "production"`, which silently breaks login
+  for any production deployment reachable only over plain HTTP (a VPS
+  addressed by bare IP before a domain exists) — browsers refuse to
+  store a Secure cookie from a non-HTTPS origin, so sign-in appears to
+  succeed and then bounces straight back to `/login`. It now follows
+  whether `NEXT_PUBLIC_APP_URL` starts with `https://`, so the cookie is
+  Secure exactly when it can be, with no code change when HTTPS arrives.
+  (Plain HTTP is still not somewhere real patient data belongs — see
+  README "Deploying to a VPS".) `httpOnly` is deliberately left
   at its library default of `false`: the browser client needs to read
   this same cookie client-side for auth state, by Supabase's own design.
   Accepted as a documented trade-off rather than something to "fix" by

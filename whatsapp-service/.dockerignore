@@ -1,0 +1,6 @@
+node_modules
+dist
+# Live WhatsApp session credentials — never bake into an image; the
+# container gets them from the whatsapp-auth named volume instead.
+auth_info
+.env*

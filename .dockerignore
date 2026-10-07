@@ -1,0 +1,24 @@
+# Keep secrets and bulk out of the Docker build context. Without this,
+# the Dockerfile's `COPY . .` would copy .env.local (including
+# SUPABASE_SERVICE_ROLE_KEY) into a build layer, plus every local
+# node_modules/.next that's about to be rebuilt anyway.
+.env*
+!.env.example
+.git
+.github
+node_modules
+.next
+out
+build
+coverage
+playwright-report
+test-results
+blob-report
+e2e
+*.tsbuildinfo
+*.docx
+*.pdf
+
+# whatsapp-service is its own image (see docker-compose.yml) — and its
+# auth_info holds live WhatsApp session credentials.
+whatsapp-service
