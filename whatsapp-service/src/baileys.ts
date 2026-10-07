@@ -34,9 +34,9 @@ const logger = pino({ level: process.env.LOG_LEVEL ?? "warn" });
 let sock: WASocket | null = null;
 let latestQrDataUrl: string | null = null;
 let connected = false;
-// Set only by an explicit /logout call, so the reconnect handler below
-// knows not to reconnect into a session that was deliberately ended.
-let loggedOutByRequest = false;
+// Guards resetSession() so a logged-out close event and an explicit
+// /logout call arriving together don't both wipe and restart.
+let resetting = false;
 
 export interface ConnectionStatus {
   connected: boolean;
@@ -47,18 +47,45 @@ export function getStatus(): ConnectionStatus {
   return { connected, qr: connected ? null : latestQrDataUrl };
 }
 
+/**
+ * Wipes the stored session and starts a brand-new connection, which
+ * produces a fresh pairing QR. Used whenever WhatsApp ends the session
+ * (the linked device was removed from the phone, or the phone didn't
+ * come online for roughly two weeks and WhatsApp unlinked it — status
+ * 401 / DisconnectReason.loggedOut) and when an administrator asks to
+ * re-pair. Before this, a logout left the service permanently idle:
+ * "not connected", no QR, and the Settings page waiting forever until
+ * someone restarted the process by hand.
+ */
+async function resetSession(): Promise<void> {
+  if (resetting) return;
+  resetting = true;
+  try {
+    sock = null;
+    connected = false;
+    latestQrDataUrl = null;
+    await rm(AUTH_DIR, { recursive: true, force: true });
+    await startBaileysConnection();
+  } finally {
+    resetting = false;
+  }
+}
+
 export async function startBaileysConnection(): Promise<void> {
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
 
-  sock = makeWASocket({
+  const thisSock = makeWASocket({
     auth: state,
     logger,
     browser: [process.env.BOT_NAME ?? "Felis Clinic ANC", "Chrome", "1.0.0"],
   });
+  sock = thisSock;
 
-  sock.ev.on("creds.update", saveCreds);
+  thisSock.ev.on("creds.update", saveCreds);
 
-  sock.ev.on("connection.update", async (update) => {
+  thisSock.ev.on("connection.update", async (update) => {
+    // A replaced socket's late events must not clobber the live one's state.
+    if (sock !== thisSock) return;
     const { connection, lastDisconnect, qr } = update;
 
     if (qr) {
@@ -75,13 +102,12 @@ export async function startBaileysConnection(): Promise<void> {
     if (connection === "close") {
       connected = false;
       const statusCode = (lastDisconnect?.error as Boom | undefined)?.output?.statusCode;
-      const shouldReconnect = !loggedOutByRequest && statusCode !== DisconnectReason.loggedOut;
-      logger.warn({ statusCode, shouldReconnect }, "WhatsApp connection closed.");
-      if (shouldReconnect) {
-        void startBaileysConnection();
-      } else {
-        loggedOutByRequest = false;
-      }
+      const loggedOut = statusCode === DisconnectReason.loggedOut;
+      logger.warn({ statusCode, loggedOut }, "WhatsApp connection closed.");
+      // Logged out: the stored credentials are dead — start over for a
+      // fresh QR. Anything else (network blip, the normal post-pairing
+      // restart): reconnect with the same session.
+      void (loggedOut ? resetSession() : startBaileysConnection());
     }
   });
 }
@@ -105,16 +131,20 @@ export async function sendText(jid: string, text: string): Promise<SendResult> {
   }
 }
 
-/** Ends the session and wipes stored credentials so a fresh QR pairing can start. */
+/** Ends the session, wipes stored credentials, and starts a fresh pairing (new QR) — see resetSession(). */
 export async function logoutAndReset(): Promise<void> {
-  loggedOutByRequest = true;
+  const before = sock;
   try {
+    // Tells WhatsApp to unlink this device. That normally also fires a
+    // loggedOut close event, whose handler runs resetSession() itself.
     await sock?.logout();
   } catch {
-    // Already disconnected — still proceed to clear local state below.
+    // Already disconnected — fall through to reset directly.
   }
-  sock = null;
-  connected = false;
-  latestQrDataUrl = null;
-  await rm(AUTH_DIR, { recursive: true, force: true });
+  // Only reset here if that handler hasn't already replaced the socket;
+  // otherwise we'd wipe the brand-new session and start a second
+  // connection. (If the handler fires later instead, it's ignored: it
+  // belongs to a socket that's no longer current — see the
+  // `sock !== thisSock` check in startBaileysConnection.)
+  if (sock === before) await resetSession();
 }
