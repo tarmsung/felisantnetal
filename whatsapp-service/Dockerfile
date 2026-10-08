@@ -29,7 +29,10 @@ USER whatsapp
 EXPOSE 3100
 ENV PORT=3100
 
+# 127.0.0.1, not localhost: inside a container localhost can resolve to ::1
+# first. Express here listens on every interface so it happened to pass, but
+# the app image's identical check didn't (see /Dockerfile) — kept consistent.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD wget -q -O /dev/null http://localhost:3100/health || exit 1
+  CMD wget -q -O /dev/null http://127.0.0.1:3100/health || exit 1
 
 CMD ["node", "dist/server.js"]
