@@ -259,9 +259,15 @@ build can be killed partway.
    address people will type into a browser) and `SITE_ADDRESS` (what
    Caddy serves — see below). `WHATSAPP_SERVICE_URL` is ignored here;
    compose points the app at the right container itself.
-5. **Start it**: `docker compose --env-file .env.local up -d --build`,
-   then `docker compose ps` (everything `running`/`healthy`) and open
-   your `NEXT_PUBLIC_APP_URL`.
+5. **Start it**: on a fresh server with nothing else on ports 80/443,
+   `docker compose --profile caddy --env-file .env.local up -d --build`
+   (Caddy handles HTTPS itself). On a server that **already has nginx**
+   (or anything else on 80/443), leave out `--profile caddy`: the app
+   then listens only on `127.0.0.1:3010` (`APP_PORT`), and you add an
+   nginx server block for your hostname that does `proxy_pass
+   http://127.0.0.1:3010;` plus `certbot --nginx -d <hostname>` for
+   HTTPS — your other sites are untouched. Then `docker compose ps`
+   (everything `running`/`healthy`) and open your `NEXT_PUBLIC_APP_URL`.
 6. **Schedule the reminder sweep** — nothing triggers
    `/api/cron/reminders` on its own. Add to the server's crontab
    (`crontab -e`), run from the repo directory:

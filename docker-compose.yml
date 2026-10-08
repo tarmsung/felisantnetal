@@ -10,11 +10,16 @@
 # --env-file matters: compose reads ".env" by default, NOT ".env.local",
 # so without it the ${...} values below come out empty.
 #
-# Only Caddy publishes ports. The app and whatsapp-service are reachable
-# solely over the internal compose network — whatsapp-service in
-# particular can send WhatsApp messages as the clinic and should never
-# be exposed directly (its API key is a second line of defense, not the
-# first).
+# Nothing is published to the internet by this file itself:
+#   - the app listens on 127.0.0.1:${APP_PORT:-3010} only (the host's
+#     loopback), for a reverse proxy already on the server (e.g. nginx +
+#     certbot) to forward to;
+#   - whatsapp-service is reachable solely over the internal compose
+#     network — it can send WhatsApp messages as the clinic and should
+#     never be exposed directly (its API key is a second line of
+#     defense, not the first);
+#   - Caddy (below) is OPT-IN, for a fresh server with nothing else on
+#     ports 80/443:  docker compose --profile caddy --env-file .env.local up -d --build
 #
 # whatsapp-service (Phase 5): read whatsapp-service/README.md — in
 # particular its ban-risk disclosure — before pairing a real clinic
@@ -22,6 +27,7 @@
 
 services:
   caddy:
+    profiles: ["caddy"]
     image: caddy:2-alpine
     environment:
       SITE_ADDRESS: ${SITE_ADDRESS:-:80}
@@ -52,8 +58,8 @@ services:
       # Overrides .env.local's http://localhost:3100 — inside this
       # container "localhost" is the app itself, not the other service.
       WHATSAPP_SERVICE_URL: http://whatsapp-service:3100
-    expose:
-      - "3000"
+    ports:
+      - "127.0.0.1:${APP_PORT:-3010}:3000"
     restart: unless-stopped
 
   whatsapp-service:
