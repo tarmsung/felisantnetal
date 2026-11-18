@@ -26,7 +26,8 @@ import makeWASocket, {
 import { Boom } from "@hapi/boom";
 import QRCode from "qrcode";
 import { pino } from "pino";
-import { rm } from "node:fs/promises";
+import { readdir, rm } from "node:fs/promises";
+import path from "node:path";
 
 const AUTH_DIR = process.env.AUTH_DIR ?? "./auth_info";
 const logger = pino({ level: process.env.LOG_LEVEL ?? "warn" });
@@ -48,6 +49,20 @@ export function getStatus(): ConnectionStatus {
 }
 
 /**
+ * Empties AUTH_DIR without removing the directory itself. In Docker,
+ * AUTH_DIR is a mounted volume (docker-compose.yml's whatsapp-auth) and a
+ * mount point can't be rmdir'd - `rm(AUTH_DIR, {recursive})` threw EBUSY,
+ * which crashed the process on every start and left the service stuck in
+ * a restart loop with no QR ever produced (found on the live VPS).
+ */
+async function clearAuthDir(): Promise<void> {
+  const entries = await readdir(AUTH_DIR).catch(() => [] as string[]);
+  await Promise.all(
+    entries.map((entry) => rm(path.join(AUTH_DIR, entry), { recursive: true, force: true })),
+  );
+}
+
+/**
  * Wipes the stored session and starts a brand-new connection, which
  * produces a fresh pairing QR. Used whenever WhatsApp ends the session
  * (the linked device was removed from the phone, or the phone didn't
@@ -64,7 +79,7 @@ async function resetSession(): Promise<void> {
     sock = null;
     connected = false;
     latestQrDataUrl = null;
-    await rm(AUTH_DIR, { recursive: true, force: true });
+    await clearAuthDir();
     await startBaileysConnection();
   } finally {
     resetting = false;
@@ -107,7 +122,11 @@ export async function startBaileysConnection(): Promise<void> {
       // Logged out: the stored credentials are dead — start over for a
       // fresh QR. Anything else (network blip, the normal post-pairing
       // restart): reconnect with the same session.
-      void (loggedOut ? resetSession() : startBaileysConnection());
+      (loggedOut ? resetSession() : startBaileysConnection()).catch((err) =>
+        // Never let a failed reconnect/reset become an unhandled rejection:
+        // that kills the process and the service can't recover on its own.
+        logger.error({ err }, "Reconnect/reset failed."),
+      );
     }
   });
 }
