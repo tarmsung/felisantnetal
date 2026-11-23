@@ -55,20 +55,22 @@ const optionalInt = (max: number, min = 0) =>
  * calling the server action directly. Dates are checked against "today"
  * in the clinic's timezone (rules.ts), not the machine's.
  */
-function refinePatient(
-  d: { date_of_birth?: string; lmp?: string; edd?: string; gravida?: number; para?: number },
-  ctx: z.RefinementCtx,
-) {
-  for (const issue of checkPatientDates(d)) {
-    ctx.addIssue({ code: "custom", path: [issue.path], message: issue.message });
-  }
-  if (d.gravida !== undefined && d.para !== undefined && d.para > d.gravida) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["para"],
-      message: "Para (previous births) can't be more than gravida (total pregnancies).",
-    });
-  }
+function patientRefiner(mode: "register" | "edit") {
+  return (
+    d: { date_of_birth?: string; lmp?: string; edd?: string; gravida?: number; para?: number },
+    ctx: z.RefinementCtx,
+  ) => {
+    for (const issue of checkPatientDates(d, undefined, mode)) {
+      ctx.addIssue({ code: "custom", path: [issue.path], message: issue.message });
+    }
+    if (d.gravida !== undefined && d.para !== undefined && d.para > d.gravida) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["para"],
+        message: "Para (previous births) can't be more than gravida (total pregnancies).",
+      });
+    }
+  };
 }
 
 /** Field-level rules only — kept separate because Zod can't `.pick()` a schema that already carries a cross-field refinement (see duplicateCheckSchema). */
@@ -95,7 +97,10 @@ const patientBaseSchema = z.object({
   gestational_information: optionalText(2000),
 });
 
-export const patientFormSchema = patientBaseSchema.superRefine(refinePatient);
+/** Registering a new patient/pregnancy — every rule, including "not too long ago" (rules.ts checkPatientDates). */
+export const patientFormSchema = patientBaseSchema.superRefine(patientRefiner("register"));
+/** Editing an existing patient — same rules minus the recency ones, so a past-due mother's record stays editable. */
+export const patientEditFormSchema = patientBaseSchema.superRefine(patientRefiner("edit"));
 
 /** Parsed/transformed shape — what services and server actions receive. */
 export type PatientFormInput = z.infer<typeof patientFormSchema>;
@@ -123,7 +128,7 @@ export type PatientFormValues = z.input<typeof patientFormSchema>;
  * Callers that hand `parsed.data` to a PatientFormInput-typed parameter
  * cast it, documented at each call site.
  */
-export const patientOutputSchema = z
+const patientOutputBase = z
   .object({
   full_name: nameField("Full name"),
   national_id: optionalNationalIdField(),
@@ -140,8 +145,10 @@ export const patientOutputSchema = z
   lmp: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   edd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Estimated date of delivery is required."),
   gestational_information: z.string().trim().max(2000).optional(),
-  })
-  .superRefine(refinePatient);
+  });
+
+export const patientOutputSchema = patientOutputBase.superRefine(patientRefiner("register"));
+export const patientEditOutputSchema = patientOutputBase.superRefine(patientRefiner("edit"));
 
 export const duplicateCheckSchema = patientBaseSchema.pick({
   full_name: true,

@@ -2,7 +2,7 @@
 
 import { requireUser } from "@/lib/auth/session";
 import { updatePatient } from "@/lib/services/patientService";
-import { patientOutputSchema, type PatientFormInput } from "@/lib/validation/patientSchemas";
+import { patientEditOutputSchema, type PatientFormInput } from "@/lib/validation/patientSchemas";
 
 export type UpdatePatientActionResult =
   | { status: "success" }
@@ -17,7 +17,7 @@ export async function updatePatientAction(
 
   // See patientOutputSchema's comment (patientSchemas.ts) — this
   // receives already-transformed data, not raw form strings.
-  const parsed = patientOutputSchema.safeParse(input);
+  const parsed = patientEditOutputSchema.safeParse(input);
   if (!parsed.success) {
     return { status: "error", message: parsed.error.issues[0]?.message ?? "Invalid input." };
   }

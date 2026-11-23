@@ -27,6 +27,7 @@ export function EditPatientForm({
     <PatientForm
       chws={chws}
       defaultValues={defaultValues}
+      mode="edit"
       submitLabel="Save changes"
       pending={pending}
       serverError={serverError}

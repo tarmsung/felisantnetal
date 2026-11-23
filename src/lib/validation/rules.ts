@@ -62,11 +62,22 @@ export interface DateIssue {
   message: string;
 }
 
-/** Cross-field date sanity for a patient + pregnancy. `today` is injectable for tests. */
+/**
+ * Cross-field date sanity for a patient + pregnancy. `today` is injectable for tests.
+ *
+ * `mode`: the "how long ago" rules (LMP more than 44 weeks back, EDD more
+ * than 4 weeks past) only make sense when a pregnancy is being REGISTERED.
+ * On an edit they'd lock out every mother whose due date has passed —
+ * even just correcting her phone number — so "edit" skips them and keeps
+ * every rule that's wrong at any time (impossible dates, future birth
+ * date, EDD ~40 weeks after LMP, EDD absurdly far ahead).
+ */
 export function checkPatientDates(
   d: { date_of_birth?: string; lmp?: string; edd?: string },
   today: string = todayKey(),
+  mode: "register" | "edit" = "register",
 ): DateIssue[] {
+  const registering = mode === "register";
   const issues: DateIssue[] = [];
 
   if (d.date_of_birth) {
@@ -89,7 +100,7 @@ export function checkPatientDates(
       issues.push({ path: "lmp", message: "That isn't a real calendar date." });
     } else if (d.lmp > today) {
       issues.push({ path: "lmp", message: "Last menstrual period can't be in the future." });
-    } else if (daysBetween(d.lmp, today) > MAX_LMP_AGE_DAYS) {
+    } else if (registering && daysBetween(d.lmp, today) > MAX_LMP_AGE_DAYS) {
       issues.push({
         path: "lmp",
         message: "That's more than 44 weeks ago — too long for a current pregnancy. Check the date.",
@@ -100,7 +111,7 @@ export function checkPatientDates(
   if (d.edd) {
     if (!isRealDate(d.edd)) {
       issues.push({ path: "edd", message: "That isn't a real calendar date." });
-    } else if (daysBetween(d.edd, today) > MAX_EDD_OVERDUE_DAYS) {
+    } else if (registering && daysBetween(d.edd, today) > MAX_EDD_OVERDUE_DAYS) {
       issues.push({ path: "edd", message: "That's more than 4 weeks in the past. Check the date." });
     } else if (daysBetween(today, d.edd) > MAX_EDD_AHEAD_DAYS) {
       issues.push({ path: "edd", message: "That's more than 42 weeks away — too far ahead. Check the date." });

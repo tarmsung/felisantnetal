@@ -4,6 +4,7 @@ import { useForm, type Resolver } from "react-hook-form";
 import { standardSchemaResolver } from "@hookform/resolvers/standard-schema";
 import {
   patientFormSchema,
+  patientEditFormSchema,
   type PatientFormValues,
   type PatientFormInput,
 } from "@/lib/validation/patientSchemas";
@@ -71,7 +72,8 @@ export function PatientForm({
   submitLabel,
   pending,
   serverError,
-}: PatientFormProps) {
+  mode = "register",
+}: PatientFormProps & { mode?: "register" | "edit" }) {
   // patientFormSchema's input type (raw form strings) differs from its
   // output type (transformed — "" -> undefined, numeric strings -> numbers).
   // Every combination of explicit useForm generics + zodResolver/
@@ -89,7 +91,7 @@ export function PatientForm({
   // Clinic-local "today" — drives the date inputs' min/max so impossible dates can't even be picked.
   const today = todayKey();
   const form = useForm<PatientFormValues>({
-    resolver: standardSchemaResolver(patientFormSchema) as unknown as Resolver<PatientFormValues>,
+    resolver: standardSchemaResolver(mode === "edit" ? patientEditFormSchema : patientFormSchema) as unknown as Resolver<PatientFormValues>,
     defaultValues: { ...EMPTY_DEFAULTS, ...defaultValues },
   });
 
@@ -277,7 +279,7 @@ export function PatientForm({
                   <Input
                     {...field}
                     type="date"
-                    min={addDays(today, -MAX_EDD_OVERDUE_DAYS)}
+                    min={mode === "edit" ? undefined : addDays(today, -MAX_EDD_OVERDUE_DAYS)}
                     max={addDays(today, MAX_EDD_AHEAD_DAYS)}
                   />
                 </FormControl>
@@ -295,7 +297,7 @@ export function PatientForm({
                   <Input
                     {...field}
                     type="date"
-                    min={addDays(today, -MAX_LMP_AGE_DAYS)}
+                    min={mode === "edit" ? undefined : addDays(today, -MAX_LMP_AGE_DAYS)}
                     max={today}
                   />
                 </FormControl>

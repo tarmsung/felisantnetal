@@ -164,3 +164,18 @@ describe("checkVisitDate", () => {
     expect(checkVisitDate("2025-01-01", TODAY)).toMatch(/11 months/);
   });
 });
+
+describe("checkPatientDates — edit mode", () => {
+  const pastDue = { date_of_birth: "1995-03-21", lmp: "2026-01-01", edd: "2026-10-08" }; // due 6 weeks ago
+  it("blocks registering a pregnancy whose due date is long past", () => {
+    expect(checkPatientDates(pastDue, TODAY, "register").map((i) => i.path)).toEqual(["lmp", "edd"]);
+  });
+  it("still lets that mother's record be edited (e.g. a phone change)", () => {
+    expect(checkPatientDates(pastDue, TODAY, "edit")).toEqual([]);
+  });
+  it("keeps the always-wrong rules on edit", () => {
+    expect(checkPatientDates({ date_of_birth: "2027-12-20", edd: "2026-10-08" }, TODAY, "edit")[0].path).toBe("date_of_birth");
+    expect(checkPatientDates({ lmp: "2026-11-19", edd: "2028-06-19" }, TODAY, "edit")[0].message).toMatch(/42 weeks away/);
+    expect(checkPatientDates({ lmp: "2026-06-01", edd: "2026-12-01" }, TODAY, "edit")[0].message).toMatch(/about 40 weeks/);
+  });
+});
