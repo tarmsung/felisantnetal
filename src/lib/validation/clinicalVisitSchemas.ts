@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { checkVisitDate } from "./rules";
 
 const optionalText = (max: number) =>
   z
@@ -9,7 +10,14 @@ const optionalText = (max: number) =>
     .or(z.literal(""))
     .transform((v) => (v ? v : undefined));
 
-const isoDate = z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a valid date.");
+const isoDate = z
+  .string()
+  .trim()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "Use a valid date.")
+  .superRefine((value, ctx) => {
+    const problem = checkVisitDate(value);
+    if (problem) ctx.addIssue({ code: "custom", message: problem });
+  });
 
 /**
  * These bounds are data-entry sanity guards against typos (a misplaced

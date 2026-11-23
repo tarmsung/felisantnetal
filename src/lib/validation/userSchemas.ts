@@ -1,21 +1,13 @@
 import { z } from "zod";
-
-const optionalText = (max: number) =>
-  z
-    .string()
-    .trim()
-    .max(max)
-    .optional()
-    .or(z.literal(""))
-    .transform((v) => (v ? v : undefined));
+import { nameField, optionalPhoneField } from "./rules";
 
 /** Matches scripts/seed.ts's own minimum — kept in one place would be nicer, but that script deliberately can't import from lib/ (see its own comment on server-only). */
 const password = z.string().min(8, "Password must be at least 8 characters.");
 
 export const createUserSchema = z.object({
-  full_name: z.string().trim().min(1, "Full name is required.").max(200),
+  full_name: nameField("Full name"),
   email: z.string().trim().min(1, "Email is required.").email("Enter a valid email address."),
-  phone: optionalText(32),
+  phone: optionalPhoneField(),
   role: z.enum(["administrator", "nurse"], { message: "Select a role." }),
   temporary_password: password,
 });

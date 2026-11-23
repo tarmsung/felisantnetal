@@ -4,6 +4,9 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Search, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { todayKey } from "@/lib/calendar";
+import { isoToClinicDateTimeLocal } from "@/lib/dates";
+import { addDays, MAX_APPOINTMENT_AHEAD_DAYS } from "@/lib/validation/rules";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -244,6 +247,8 @@ function AddAppointmentForm({
             <Input
               id="scheduled-date"
               type="datetime-local"
+              min={isoToClinicDateTimeLocal(new Date().toISOString())}
+              max={`${addDays(todayKey(), MAX_APPOINTMENT_AHEAD_DAYS)}T23:59`}
               value={dateTime}
               onChange={(e) => setDateTime(e.target.value)}
             />

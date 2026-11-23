@@ -68,7 +68,7 @@ export function AddChwDialog() {
           </div>
           <div className="grid gap-2">
             <Label htmlFor="chw_phone">Phone</Label>
-            <Input id="chw_phone" name="phone" type="tel" />
+            <Input id="chw_phone" name="phone" type="tel" inputMode="tel" placeholder="0771234567" autoComplete="off" />
           </div>
           <div className="grid gap-2">
             <Label htmlFor="chw_area">Area</Label>

@@ -7,6 +7,15 @@ import {
   type PatientFormValues,
   type PatientFormInput,
 } from "@/lib/validation/patientSchemas";
+import { todayKey } from "@/lib/calendar";
+import {
+  addDays,
+  MAX_EDD_AHEAD_DAYS,
+  MAX_EDD_OVERDUE_DAYS,
+  MAX_LMP_AGE_DAYS,
+  MAX_PATIENT_AGE,
+  MIN_PATIENT_AGE,
+} from "@/lib/validation/rules";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
@@ -77,6 +86,8 @@ export function PatientForm({
   // resolver cast below documents the single spot where the real
   // runtime type (post-transform) diverges from what TS is told it is —
   // corrected immediately after by the matching cast in handleSubmit.
+  // Clinic-local "today" — drives the date inputs' min/max so impossible dates can't even be picked.
+  const today = todayKey();
   const form = useForm<PatientFormValues>({
     resolver: standardSchemaResolver(patientFormSchema) as unknown as Resolver<PatientFormValues>,
     defaultValues: { ...EMPTY_DEFAULTS, ...defaultValues },
@@ -112,8 +123,17 @@ export function PatientForm({
               <FormItem>
                 <FormLabel>National ID</FormLabel>
                 <FormControl>
-                  <Input {...field} />
+                  <Input
+                    {...field}
+                    placeholder="63-123456A42"
+                    maxLength={20}
+                    autoCapitalize="characters"
+                    autoComplete="off"
+                  />
                 </FormControl>
+                <p className="text-xs text-muted-foreground">
+                  Zimbabwean format: 2 digits, 6–7 digits, a letter, 2 digits.
+                </p>
                 <FormMessage />
               </FormItem>
             )}
@@ -125,7 +145,12 @@ export function PatientForm({
               <FormItem>
                 <FormLabel>Date of birth</FormLabel>
                 <FormControl>
-                  <Input {...field} type="date" />
+                  <Input
+                    {...field}
+                    type="date"
+                    min={`${Number(today.slice(0, 4)) - MAX_PATIENT_AGE}${today.slice(4)}`}
+                    max={`${Number(today.slice(0, 4)) - MIN_PATIENT_AGE}${today.slice(4)}`}
+                  />
                 </FormControl>
                 <FormMessage />
               </FormItem>
@@ -178,7 +203,7 @@ export function PatientForm({
               <FormItem>
                 <FormLabel>Phone</FormLabel>
                 <FormControl>
-                  <Input {...field} type="tel" />
+                  <Input {...field} type="tel" inputMode="tel" placeholder="0771234567" autoComplete="off" />
                 </FormControl>
                 <FormMessage />
               </FormItem>
@@ -191,7 +216,7 @@ export function PatientForm({
               <FormItem>
                 <FormLabel>Alternative phone</FormLabel>
                 <FormControl>
-                  <Input {...field} type="tel" />
+                  <Input {...field} type="tel" inputMode="tel" placeholder="0771234567" autoComplete="off" />
                 </FormControl>
                 <FormMessage />
               </FormItem>
@@ -230,7 +255,7 @@ export function PatientForm({
               <FormItem>
                 <FormLabel>Emergency contact phone</FormLabel>
                 <FormControl>
-                  <Input {...field} type="tel" />
+                  <Input {...field} type="tel" inputMode="tel" placeholder="0771234567" autoComplete="off" />
                 </FormControl>
                 <FormMessage />
               </FormItem>
@@ -249,7 +274,12 @@ export function PatientForm({
               <FormItem>
                 <FormLabel>Estimated date of delivery (EDD)</FormLabel>
                 <FormControl>
-                  <Input {...field} type="date" />
+                  <Input
+                    {...field}
+                    type="date"
+                    min={addDays(today, -MAX_EDD_OVERDUE_DAYS)}
+                    max={addDays(today, MAX_EDD_AHEAD_DAYS)}
+                  />
                 </FormControl>
                 <FormMessage />
               </FormItem>
@@ -262,7 +292,12 @@ export function PatientForm({
               <FormItem>
                 <FormLabel>Last menstrual period (LMP)</FormLabel>
                 <FormControl>
-                  <Input {...field} type="date" />
+                  <Input
+                    {...field}
+                    type="date"
+                    min={addDays(today, -MAX_LMP_AGE_DAYS)}
+                    max={today}
+                  />
                 </FormControl>
                 <FormMessage />
               </FormItem>
@@ -275,7 +310,7 @@ export function PatientForm({
               <FormItem>
                 <FormLabel>Gravida</FormLabel>
                 <FormControl>
-                  <Input {...field} type="number" min={0} inputMode="numeric" />
+                  <Input {...field} type="number" min={1} max={30} inputMode="numeric" />
                 </FormControl>
                 <FormMessage />
               </FormItem>
@@ -288,7 +323,7 @@ export function PatientForm({
               <FormItem>
                 <FormLabel>Para</FormLabel>
                 <FormControl>
-                  <Input {...field} type="number" min={0} inputMode="numeric" />
+                  <Input {...field} type="number" min={0} max={30} inputMode="numeric" />
                 </FormControl>
                 <FormMessage />
               </FormItem>

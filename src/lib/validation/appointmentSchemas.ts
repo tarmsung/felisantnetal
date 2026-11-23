@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { checkAppointmentDateTime } from "./rules";
 
 const optionalText = (max: number) =>
   z
@@ -9,11 +10,21 @@ const optionalText = (max: number) =>
     .or(z.literal(""))
     .transform((v) => (v ? v : undefined));
 
-/** Matches <input type="datetime-local"> — see lib/dates.ts for the clinic-timezone conversion this feeds into. */
+/**
+ * Matches <input type="datetime-local"> — see lib/dates.ts for the
+ * clinic-timezone conversion this feeds into — and must also be a REAL
+ * date/time that hasn't already passed and isn't absurdly far ahead
+ * (rules.ts checkAppointmentDateTime): the format regex alone accepted
+ * 2026-02-31T09:00 and any time in the past.
+ */
 const localDateTime = z
   .string()
   .trim()
-  .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/, "Pick a date and time.");
+  .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/, "Pick a date and time.")
+  .superRefine((value, ctx) => {
+    const problem = checkAppointmentDateTime(value);
+    if (problem) ctx.addIssue({ code: "custom", message: problem });
+  });
 
 export const createAppointmentSchema = z.object({
   patient_id: z.string().uuid(),
@@ -23,7 +34,10 @@ export const createAppointmentSchema = z.object({
     .trim()
     .optional()
     .or(z.literal(""))
-    .transform((v) => (v ? Number(v) : undefined)),
+    .transform((v) => (v ? Number(v) : undefined))
+    .refine((v) => v === undefined || (Number.isInteger(v) && v >= 1 && v <= 30), {
+      message: "Visit number must be a whole number from 1 to 30.",
+    }),
   appointment_type: z.string().trim().min(1, "Appointment type is required.").max(100),
   scheduled_date_local: localDateTime,
   notes: optionalText(1000),

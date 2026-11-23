@@ -4,6 +4,8 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Search, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { todayKey } from "@/lib/calendar";
+import { addDays, MAX_VISIT_AGE_DAYS } from "@/lib/validation/rules";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -261,6 +263,8 @@ export function RecordVisitForm({
               <Input
                 id="visit-date"
                 type="date"
+                min={addDays(todayKey(), -MAX_VISIT_AGE_DAYS)}
+                max={todayKey()}
                 value={visitDate}
                 onChange={(e) => setVisitDate(e.target.value)}
               />

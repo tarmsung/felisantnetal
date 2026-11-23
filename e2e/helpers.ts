@@ -104,14 +104,30 @@ export async function login(page: Page, role: StaffRole): Promise<void> {
   await page.waitForURL(/\/dashboard/, { timeout: 15_000 });
 }
 
+/** Unique, letters-only token (a–z) — timestamp + randomness, re-encoded without digits. */
+export function e2eUnique(): string {
+  // Date.now() * 1000 (~1.8e15) stays within Number.MAX_SAFE_INTEGER (~9e15).
+  const n = Date.now() * 1000 + Math.floor(Math.random() * 1000);
+  return n.toString(26).replace(/[0-9a-p]/g, (c) => String.fromCharCode(97 + parseInt(c, 26)));
+}
+
 /**
- * A name/tag that's both unique (won't collide with real clinic data or
- * a previous, possibly-failed test run) and obviously test data if
- * anyone ever looks at the table directly.
+ * A person-name-shaped tag that's both unique (won't collide with real
+ * clinic data or a previous, possibly-failed run) and obviously test
+ * data if anyone looks at the table directly. Letters and spaces only,
+ * because patient/staff names are validated as real names (no digits —
+ * see src/lib/validation/rules.ts), e.g. "Autotest Register qxjhdkfaab".
  */
 export function e2eTag(label: string): string {
-  const unique = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  return `E2E-TEST-${label}-${unique}`;
+  return `Autotest ${label} ${e2eUnique()}`;
+}
+
+/** A random but correctly-SHAPED Zimbabwean national ID, already in the app's canonical form (63-123456A42). */
+export function e2eNationalId(): string {
+  const two = () => String(10 + Math.floor(Math.random() * 90));
+  const six = String(Math.floor(Math.random() * 1_000_000)).padStart(6, "0");
+  const letter = String.fromCharCode(65 + Math.floor(Math.random() * 26));
+  return `${two()}-${six}${letter}${two()}`;
 }
 
 /** YYYY-MM-DD, `daysFromNow` in the future — for date-only fields like EDD/DOB. */
@@ -223,7 +239,7 @@ export async function createTestPatientWithPregnancy(
  *  - patients: set `deleted_at`, the app's own soft-delete field. Every
  *    read in the app filters `is("deleted_at", null)`, so this makes
  *    the row permanently invisible everywhere the UI looks, even though
- *    it's still physically present (still `E2E-TEST-`-tagged if anyone
+ *    it's still physically present (still `Autotest`-tagged if anyone
  *    inspects the table directly).
  *  - pregnancies: no soft-delete column exists at all, and rows are
  *    only ever removed via `on delete cascade` from their patient —

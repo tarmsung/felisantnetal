@@ -1,4 +1,11 @@
 import { z } from "zod";
+import {
+  checkPatientDates,
+  nameField,
+  optionalNameField,
+  optionalNationalIdField,
+  optionalPhoneField,
+} from "./rules";
 
 /**
  * What's actually required to submit vs. what the spec lists as fields
@@ -31,31 +38,54 @@ const isoDate = z
   .or(z.literal(""))
   .transform((v) => (v ? v : undefined));
 
-const optionalInt = (max: number) =>
+const optionalInt = (max: number, min = 0) =>
   z
     .string()
     .trim()
     .optional()
     .or(z.literal(""))
     .transform((v) => (v ? Number(v) : undefined))
-    .refine((v) => v === undefined || (Number.isInteger(v) && v >= 0 && v <= max), {
-      message: `Enter a whole number between 0 and ${max}.`,
+    .refine((v) => v === undefined || (Number.isInteger(v) && v >= min && v <= max), {
+      message: `Enter a whole number between ${min} and ${max}.`,
     });
 
-export const patientFormSchema = z.object({
-  full_name: z.string().trim().min(1, "Full name is required.").max(200),
-  national_id: optionalText(64),
+/**
+ * Cross-field rules shared by the form schema (browser) and the output
+ * schema (server) — a rule only the form enforced could be skipped by
+ * calling the server action directly. Dates are checked against "today"
+ * in the clinic's timezone (rules.ts), not the machine's.
+ */
+function refinePatient(
+  d: { date_of_birth?: string; lmp?: string; edd?: string; gravida?: number; para?: number },
+  ctx: z.RefinementCtx,
+) {
+  for (const issue of checkPatientDates(d)) {
+    ctx.addIssue({ code: "custom", path: [issue.path], message: issue.message });
+  }
+  if (d.gravida !== undefined && d.para !== undefined && d.para > d.gravida) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["para"],
+      message: "Para (previous births) can't be more than gravida (total pregnancies).",
+    });
+  }
+}
+
+/** Field-level rules only — kept separate because Zod can't `.pick()` a schema that already carries a cross-field refinement (see duplicateCheckSchema). */
+const patientBaseSchema = z.object({
+  full_name: nameField("Full name"),
+  national_id: optionalNationalIdField(),
   date_of_birth: isoDate,
-  phone: optionalText(32),
-  alternative_phone: optionalText(32),
+  phone: optionalPhoneField(),
+  alternative_phone: optionalPhoneField(),
   address: optionalText(500),
-  emergency_contact_name: optionalText(200),
-  emergency_contact_phone: optionalText(32),
+  emergency_contact_name: optionalNameField(200),
+  emergency_contact_phone: optionalPhoneField(),
   community_health_worker_id: z
     .string()
     .uuid("Select a community health worker."),
   notes: optionalText(2000),
-  gravida: optionalInt(30),
+  gravida: optionalInt(30, 1),
   para: optionalInt(30),
   lmp: isoDate,
   edd: z
@@ -64,6 +94,8 @@ export const patientFormSchema = z.object({
     .regex(/^\d{4}-\d{2}-\d{2}$/, "Estimated date of delivery is required."),
   gestational_information: optionalText(2000),
 });
+
+export const patientFormSchema = patientBaseSchema.superRefine(refinePatient);
 
 /** Parsed/transformed shape — what services and server actions receive. */
 export type PatientFormInput = z.infer<typeof patientFormSchema>;
@@ -91,25 +123,27 @@ export type PatientFormValues = z.input<typeof patientFormSchema>;
  * Callers that hand `parsed.data` to a PatientFormInput-typed parameter
  * cast it, documented at each call site.
  */
-export const patientOutputSchema = z.object({
-  full_name: z.string().trim().min(1, "Full name is required.").max(200),
-  national_id: z.string().trim().max(64).optional(),
+export const patientOutputSchema = z
+  .object({
+  full_name: nameField("Full name"),
+  national_id: optionalNationalIdField(),
   date_of_birth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  phone: z.string().trim().max(32).optional(),
-  alternative_phone: z.string().trim().max(32).optional(),
+  phone: optionalPhoneField(),
+  alternative_phone: optionalPhoneField(),
   address: z.string().trim().max(500).optional(),
-  emergency_contact_name: z.string().trim().max(200).optional(),
-  emergency_contact_phone: z.string().trim().max(32).optional(),
+  emergency_contact_name: optionalNameField(200),
+  emergency_contact_phone: optionalPhoneField(),
   community_health_worker_id: z.string().uuid("Select a community health worker."),
   notes: z.string().trim().max(2000).optional(),
-  gravida: z.number().int().min(0).max(30).optional(),
+  gravida: z.number().int().min(1).max(30).optional(),
   para: z.number().int().min(0).max(30).optional(),
   lmp: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   edd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Estimated date of delivery is required."),
   gestational_information: z.string().trim().max(2000).optional(),
-});
+  })
+  .superRefine(refinePatient);
 
-export const duplicateCheckSchema = patientFormSchema.pick({
+export const duplicateCheckSchema = patientBaseSchema.pick({
   full_name: true,
   national_id: true,
   phone: true,

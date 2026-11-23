@@ -1,8 +1,9 @@
 import { z } from "zod";
+import { nameField, optionalPhoneField } from "./rules";
 
 export const createChwSchema = z.object({
-  full_name: z.string().trim().min(1, "Full name is required.").max(200),
-  phone: z.string().trim().max(32).optional().or(z.literal("")),
+  full_name: nameField("Full name"),
+  phone: optionalPhoneField(),
   area: z.string().trim().max(200).optional().or(z.literal("")),
 });
 

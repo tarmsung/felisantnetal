@@ -3,6 +3,7 @@ import {
   createSupabaseAdminClient,
   login,
   e2eTag,
+  e2eUnique,
   deactivateTestUser,
   tryHardDeleteAuthUser,
 } from "./helpers";
@@ -29,7 +30,7 @@ import {
  *    design — deactivation, not deletion, is the only real "remove this
  *    account" operation this app supports (see ManageUserSheet's
  *    "Active" switch), and the residual account row this test leaves
- *    behind is `E2E-TEST-`-tagged and permanently inactive.
+ *    behind is `Autotest`-tagged and permanently inactive.
  */
 test.describe("admin users management", () => {
   // Constructed inside a hook, not at module scope — see
@@ -54,7 +55,7 @@ test.describe("admin users management", () => {
     await login(page, "administrator");
 
     const fullName = e2eTag("Staff");
-    const email = `${e2eTag("staff").toLowerCase()}@example.com`;
+    const email = `autotest-staff-${e2eUnique()}@example.com`;
 
     await page.goto("/users");
     await page.getByRole("button", { name: "Add user" }).click();

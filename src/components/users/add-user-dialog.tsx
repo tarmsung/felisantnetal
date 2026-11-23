@@ -162,7 +162,7 @@ function AddUserForm({ onClose }: { onClose: () => void }) {
           </div>
           <div className="grid gap-2">
             <Label htmlFor="new-user-phone">Phone</Label>
-            <Input id="new-user-phone" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Optional" />
+            <Input id="new-user-phone" type="tel" inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Optional, e.g. 0771234567" />
           </div>
         </div>
         <div className="grid gap-2">

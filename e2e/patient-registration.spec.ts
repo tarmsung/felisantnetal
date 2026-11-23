@@ -4,6 +4,7 @@ import {
   getAnyActiveCommunityHealthWorkerId,
   login,
   e2eTag,
+  e2eNationalId,
   futureDateOnly,
   softDeleteTestPatient,
 } from "./helpers";
@@ -96,7 +97,7 @@ test.describe("patient registration", () => {
     await login(page, "nurse");
 
     const fullName = e2eTag("Duplicate");
-    const nationalId = e2eTag("NatID");
+    const nationalId = e2eNationalId();
     const edd = futureDateOnly(200);
 
     async function fillMinimumFields() {

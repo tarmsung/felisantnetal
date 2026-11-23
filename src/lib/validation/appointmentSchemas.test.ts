@@ -1,10 +1,17 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   createAppointmentSchema,
   rescheduleAppointmentSchema,
   cancelAppointmentSchema,
   addAppointmentNoteSchema,
 } from "./appointmentSchemas";
+
+// Appointment times must not be in the past, so pin "now" (these tests must not rot).
+beforeAll(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-11-23T10:00:00Z"));
+});
+afterAll(() => vi.useRealTimers());
 
 const validUuid = "11111111-1111-4111-8111-111111111111";
 
@@ -14,7 +21,7 @@ describe("createAppointmentSchema", () => {
     pregnancy_id: validUuid,
     visit_number: "3",
     appointment_type: "ANC Visit",
-    scheduled_date_local: "2026-09-01T09:00",
+    scheduled_date_local: "2026-12-01T09:00",
     notes: "",
   };
 
@@ -38,6 +45,19 @@ describe("createAppointmentSchema", () => {
     expect(result.success).toBe(false);
   });
 
+  it("rejects a time that has already passed", () => {
+    const r = createAppointmentSchema.safeParse({ ...base, scheduled_date_local: "2026-11-22T09:00" });
+    expect(r.success).toBe(false);
+    expect(!r.success && r.error.issues[0].message).toMatch(/already passed/);
+  });
+
+  it("rejects a date that doesn't exist, and one absurdly far ahead", () => {
+    expect(createAppointmentSchema.safeParse({ ...base, scheduled_date_local: "2026-12-32T09:00" }).success).toBe(false);
+    expect(createAppointmentSchema.safeParse({ ...base, scheduled_date_local: "2026-02-30T09:00" }).success).toBe(false);
+    expect(createAppointmentSchema.safeParse({ ...base, scheduled_date_local: "2026-12-01T25:00" }).success).toBe(false);
+    expect(createAppointmentSchema.safeParse({ ...base, scheduled_date_local: "2028-01-01T09:00" }).success).toBe(false);
+  });
+
   it("rejects a missing appointment type", () => {
     const result = createAppointmentSchema.safeParse({ ...base, appointment_type: "" });
     expect(result.success).toBe(false);
@@ -53,14 +73,14 @@ describe("rescheduleAppointmentSchema", () => {
   it("requires both a new date and a reason", () => {
     expect(
       rescheduleAppointmentSchema.safeParse({
-        new_scheduled_date_local: "2026-09-01T09:00",
+        new_scheduled_date_local: "2026-12-01T09:00",
         reason: "Patient requested a later slot",
       }).success,
     ).toBe(true);
 
     expect(
       rescheduleAppointmentSchema.safeParse({
-        new_scheduled_date_local: "2026-09-01T09:00",
+        new_scheduled_date_local: "2026-12-01T09:00",
         reason: "",
       }).success,
     ).toBe(false);
