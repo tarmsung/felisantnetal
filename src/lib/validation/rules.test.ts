@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  checkAgeVsGravida,
+  maxGravidaForAge,
   checkAppointmentDateTime,
   checkVisitDate,
   ageInYears,
@@ -177,5 +179,39 @@ describe("checkPatientDates — edit mode", () => {
     expect(checkPatientDates({ date_of_birth: "2027-12-20", edd: "2026-10-08" }, TODAY, "edit")[0].path).toBe("date_of_birth");
     expect(checkPatientDates({ lmp: "2026-11-19", edd: "2028-06-19" }, TODAY, "edit")[0].message).toMatch(/42 weeks away/);
     expect(checkPatientDates({ lmp: "2026-06-01", edd: "2026-12-01" }, TODAY, "edit")[0].message).toMatch(/about 40 weeks/);
+  });
+});
+
+describe("checkAgeVsGravida", () => {
+  it("rejects the real record: age 10, gravida 7", () => {
+    expect(checkAgeVsGravida("2016-11-23", 7, TODAY)).toMatch(/7 pregnancies at age 10 isn't possible/);
+  });
+  it("allows plausible combinations", () => {
+    expect(checkAgeVsGravida("2014-11-01", 1, TODAY)).toBeNull(); // 12, first pregnancy
+    expect(checkAgeVsGravida("1990-01-01", 7, TODAY)).toBeNull(); // 36, grand multipara
+    expect(checkAgeVsGravida(undefined, 7, TODAY)).toBeNull(); // DOB unknown: nothing to compare
+  });
+  it("allows one pregnancy at 12 and one more per year", () => {
+    expect(maxGravidaForAge(12)).toBe(1);
+    expect(maxGravidaForAge(16)).toBe(5);
+  });
+});
+
+describe("minimum age is 12", () => {
+  it("rejects an 11-year-old, accepts a 12-year-old", () => {
+    expect(checkPatientDates({ date_of_birth: "2015-01-01", edd: "2027-02-01" }, TODAY)[0].message).toMatch(/makes the patient 11/);
+    expect(checkPatientDates({ date_of_birth: "2014-01-01", edd: "2027-02-01" }, TODAY)).toEqual([]);
+  });
+});
+
+describe("normalizeName capitalisation", () => {
+  it("capitalises names typed all lower- or all upper-case", () => {
+    expect(normalizeName("tendai chione")).toBe("Tendai Chione");
+    expect(normalizeName("TENDAI CHIONE")).toBe("Tendai Chione");
+    expect(normalizeName("o'brien-moyo")).toBe("O'Brien-Moyo");
+  });
+  it("leaves deliberately mixed-case names alone", () => {
+    expect(normalizeName("McDonald Moyo")).toBe("McDonald Moyo");
+    expect(normalizeName("Anna van der Merwe")).toBe("Anna van der Merwe");
   });
 });

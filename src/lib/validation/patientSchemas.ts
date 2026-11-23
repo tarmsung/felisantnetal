@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  checkAgeVsGravida,
   checkPatientDates,
   nameField,
   optionalNameField,
@@ -63,6 +64,8 @@ function patientRefiner(mode: "register" | "edit") {
     for (const issue of checkPatientDates(d, undefined, mode)) {
       ctx.addIssue({ code: "custom", path: [issue.path], message: issue.message });
     }
+    const ageProblem = checkAgeVsGravida(d.date_of_birth, d.gravida);
+    if (ageProblem) ctx.addIssue({ code: "custom", path: ["gravida"], message: ageProblem });
     if (d.gravida !== undefined && d.para !== undefined && d.para > d.gravida) {
       ctx.addIssue({
         code: "custom",

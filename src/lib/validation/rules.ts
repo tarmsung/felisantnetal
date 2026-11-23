@@ -44,8 +44,22 @@ export function ageInYears(dob: string, today: string): number {
   return ty - by - (tm < bm || (tm === bm && td < bd) ? 1 : 0);
 }
 
-/** Bounds for an ANC patient's age — outside this is almost certainly a typo in the year. */
-export const MIN_PATIENT_AGE = 10;
+/**
+ * Bounds for an ANC patient's age — outside this is almost certainly a
+ * typo in the year. 12, not 10: a pregnancy under 12 is vanishingly rare
+ * and, if genuine, a safeguarding matter to handle outside routine
+ * registration (raised at the clinic's request).
+ */
+export const MIN_PATIENT_AGE = 12;
+/**
+ * Most pregnancies physically possible by a given age: one at 12, one
+ * more per year after that (gravida <= age - 11). Generous — it only
+ * catches combinations like "age 10, gravida 7", which mean the birth
+ * year or the gravida was mistyped.
+ */
+export function maxGravidaForAge(age: number): number {
+  return Math.max(1, age - (MIN_PATIENT_AGE - 1));
+}
 export const MAX_PATIENT_AGE = 60;
 /** LMP older than this (44 weeks) can't belong to a current pregnancy. */
 export const MAX_LMP_AGE_DAYS = 308;
@@ -174,6 +188,25 @@ export function checkVisitDate(date: string, today: string = todayKey()): string
   return null;
 }
 
+/**
+ * Date of birth vs. number of pregnancies — each can look fine alone and
+ * be impossible together (a real record: age 10, gravida 7, para 6).
+ * Returns an error message for the gravida field, or null.
+ */
+export function checkAgeVsGravida(
+  dateOfBirth: string | undefined,
+  gravida: number | undefined,
+  today: string = todayKey(),
+): string | null {
+  if (!dateOfBirth || gravida === undefined || !isRealDate(dateOfBirth) || dateOfBirth > today) return null;
+  const age = ageInYears(dateOfBirth, today);
+  const max = maxGravidaForAge(age);
+  if (gravida > max) {
+    return `${gravida} pregnancies at age ${age} isn't possible — check the date of birth or gravida.`;
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // Zimbabwean national ID
 // ---------------------------------------------------------------------------
@@ -239,7 +272,16 @@ const NAME = /^\p{L}[\p{L}\p{M}'’.\- ]+$/u;
 
 export function normalizeName(raw: string): string | null {
   const collapsed = raw.trim().replace(/\s+/g, " ");
-  return NAME.test(collapsed) ? collapsed : null;
+  if (!NAME.test(collapsed)) return null;
+  // Only re-case a name typed entirely in lower- or upper-case ("tendai
+  // chione", "TENDAI CHIONE"). Mixed case was typed deliberately — leave
+  // "McDonald", "van der Merwe", "O'Brien" exactly as entered.
+  const allLower = collapsed === collapsed.toLowerCase();
+  const allUpper = collapsed === collapsed.toUpperCase();
+  if (!allLower && !allUpper) return collapsed;
+  return collapsed
+    .toLowerCase()
+    .replace(/(^|[\s\-'’])(\p{L})/gu, (_, sep: string, ch: string) => sep + ch.toUpperCase());
 }
 
 export const NAME_MESSAGE = "Use letters only (spaces, hyphens and apostrophes are fine) — no digits or symbols.";
